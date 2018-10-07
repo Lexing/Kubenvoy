@@ -7,6 +7,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
@@ -14,21 +15,7 @@ import (
 
 var watchConnectionMaxTime = flag.Int64("watch_max_keep_alive", 60, "Maximum time to keep connection alive on watch")
 
-// func watchAndHandleEvents() {
-// 	for {
-// 		event, ok := <-watch.ResultChan()
-// 		if !ok {
-// 			log.Print("done close")
-// 			watch.Stop()
-// 			next <- true
-// 			break
-// 		}
-// 		log.Print(event)
-// 	}
-// }
-
-func watchEndpoints(clientset *kubernetes.Clientset, ctx context.Context, target *EDSTarget, handler EndpointsEventHandler) {
-
+func watchEndpoints(clientset *kubernetes.Clientset, ctx context.Context, target *EDSTarget, handler EventHandler) {
 	next := make(chan bool)
 	go func() {
 		next <- true
@@ -43,8 +30,8 @@ func watchEndpoints(clientset *kubernetes.Clientset, ctx context.Context, target
 			log.Printf("watchEndpoints cancelled %v", target.String())
 			return
 		case <-next:
-			log.Print("start")
-			watch, err := clientset.CoreV1().Endpoints(target.namespace).Watch(metav1.ListOptions{
+			log.Printf("connection (re)start for %v", target)
+			endpointsWatch, err := clientset.CoreV1().Endpoints(target.namespace).Watch(metav1.ListOptions{
 				FieldSelector: endpointsSelector, TimeoutSeconds: watchConnectionMaxTime})
 			if err != nil {
 				log.Print(err)
@@ -52,23 +39,32 @@ func watchEndpoints(clientset *kubernetes.Clientset, ctx context.Context, target
 				go func() {
 					next <- true
 				}()
-				log.Print("break")
+				log.Printf("break for %v", target)
 				break
 			}
-			log.Print("error pass")
 
-			go func() {
-				for {
-					event, ok := <-watch.ResultChan()
-					if !ok {
-						log.Print("done close")
-						watch.Stop()
-						next <- true
-						break
-					}
-					handler(target, &event)
-				}
-			}()
+			go func(watchInterface watch.Interface) {
+				watchResultsWithTicker(endpointsWatch.ResultChan(), target, handler, 60*time.Second)
+				endpointsWatch.Stop()
+				next <- true
+			}(endpointsWatch)
+		}
+	}
+}
+
+func watchResultsWithTicker(resultChan <-chan watch.Event, target *EDSTarget, handler EventHandler, duration time.Duration) {
+	ticker := time.NewTicker(duration)
+	for {
+		select {
+		case <-ticker.C:
+			log.Printf("Not able to get any results for %v after %v", target, duration)
+		case event, ok := <-resultChan:
+			ticker.Stop()
+			if !ok {
+				log.Print("Watch channel closed")
+				return
+			}
+			handler(target, &event)
 		}
 	}
 }

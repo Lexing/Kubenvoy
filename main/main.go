@@ -42,6 +42,7 @@ func main() {
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 		<-sig
 		rpcs.GracefulStop()
+		log.Print("Trying to gracefully stop server.")
 	}()
 
 	if err := rpcs.Serve(lis); err != nil {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -66,29 +67,29 @@ func NewKubenvoyXDSServer(masterURL string, kubeConfigPath string) *KubenvoyXDSS
 	// respC := make(chan *envoy.DiscoveryResponse)
 	// go func() {
 	// 	for {
-	// 		log.Print("Sending %v", <-respC)
+	// 		log.Printf("Sending %v", <-respC)
 	// 	}
 	// }()
 	// target, err := parseTargetResourceName("checkinserver.default:8090")
 	// if err != nil {
 	// 	log.Print("failed to parse target.")
 	// } else {
-	// 	go server.watcher.WatchService(context.Background(), target, server.CreateEndpointsEventHandler(respC))
+	// 	go server.watcher.WatchService(target, server.CreateEndpointsEventHandler(respC))
 	// }
 
 	// go func() {
-	// 	time.Sleep(5 * time.Second)
+	// 	// time.Sleep(5 * time.Second)
 	// 	respC2 := make(chan *envoy.DiscoveryResponse)
 	// 	go func() {
 	// 		for {
-	// 			log.Print("Sending222 %v", <-respC2)
+	// 			log.Printf("Sending222 %v", <-respC2)
 	// 		}
 	// 	}()
 	// 	target, err = parseTargetResourceName("checkinserver.default:8090")
 	// 	if err != nil {
 	// 		log.Print("failed to parse target.")
 	// 	} else {
-	// 		server.watcher.WatchService(context.Background(), target, server.CreateEndpointsEventHandler(respC2))
+	// 		server.watcher.WatchService(target, server.CreateEndpointsEventHandler(respC2))
 	// 	}
 	// }()
 
@@ -97,46 +98,108 @@ func NewKubenvoyXDSServer(masterURL string, kubeConfigPath string) *KubenvoyXDSS
 
 type K8ServiceEndpointsWatcher struct {
 	k8sClientSet *kubernetes.Clientset
-	watching     map[string]context.CancelFunc
+	watches      map[string]*EndpointsWatch
 	mutex        *sync.RWMutex
+}
+
+type EndpointsWatch struct {
+	clientset          *kubernetes.Clientset
+	target             *EDSTarget
+	started            uint32
+	startedMutex       sync.Mutex
+	ctx                context.Context
+	cancel             context.CancelFunc
+	handlers           []EndpointsHandler
+	mutex              sync.RWMutex
+	lastestEventpoints *v1.Endpoints
+}
+
+func (w *EndpointsWatch) watchAndHandle() {
+	log.Print("Inside watchAndHandle")
+	watchEndpoints(w.clientset, w.ctx, w.target, w.handleEvents)
+}
+
+func (w *EndpointsWatch) WatchAndHandleOnce() {
+	log.Print("Here WatchAndHandle")
+	defer log.Print("After WatchAndHandle")
+
+	if atomic.LoadUint32(&w.started) == 1 {
+		return
+	}
+	// Slow-path.
+	w.startedMutex.Lock()
+	defer w.startedMutex.Unlock()
+	if w.started == 0 {
+		atomic.StoreUint32(&w.started, 1)
+		w.watchAndHandle()
+	}
+}
+
+func (w *EndpointsWatch) handleEvents(target *EDSTarget, event *watch.Event) {
+	endpoints, ok := event.Object.(*v1.Endpoints)
+	if !ok {
+		log.Print("unexpected event object kind %v", event.Object.GetObjectKind())
+		return
+	}
+
+	w.mutex.RLock()
+	handlers := w.handlers
+	w.lastestEventpoints = endpoints
+	w.mutex.RUnlock()
+	for _, h := range handlers {
+		h(target, endpoints)
+	}
+}
+
+func (w *EndpointsWatch) AddHandler(handler EndpointsHandler) {
+	w.mutex.Lock()
+	w.handlers = append(w.handlers, handler)
+	w.mutex.Unlock()
+	if w.lastestEventpoints != nil && w.target != nil {
+		handler(w.target, w.lastestEventpoints)
+	}
 }
 
 func NewK8ServiceEndpointsWatcher(clientset *kubernetes.Clientset) *K8ServiceEndpointsWatcher {
 	return &K8ServiceEndpointsWatcher{
 		k8sClientSet: clientset,
-		watching:     make(map[string]context.CancelFunc),
+		watches:      make(map[string]*EndpointsWatch),
 		mutex:        &sync.RWMutex{},
 	}
 }
 
-// EndpointsEventHandler handles kubernetes event with a target context, those events are
+// EventHandler handles kubernetes event with a target context, those events are
 // usually from results of watch
-type EndpointsEventHandler func(target *EDSTarget, event *watch.Event)
+type EventHandler func(target *EDSTarget, events *watch.Event)
+
+// EndpointsHandler handles kubernetes endpoints with a target context, those events are
+// usually from results of watch
+type EndpointsHandler func(target *EDSTarget, endpoints *v1.Endpoints)
 
 // WatchService watches specified target and then process the events with handler. It blocks until
 // context is cancelled.
-func (w *K8ServiceEndpointsWatcher) WatchService(ctx context.Context, target *EDSTarget, handler EndpointsEventHandler) {
+func (w *K8ServiceEndpointsWatcher) WatchService(target *EDSTarget, handler EndpointsHandler) {
 	w.mutex.Lock()
-	cancel, exist := w.watching[target.String()]
-	if exist {
-		// cancel existing one, start a new one
-		cancel()
+	_, exist := w.watches[target.String()]
+	if !exist {
+		info := &EndpointsWatch{
+			clientset: w.k8sClientSet,
+			target:    target,
+			handlers:  make([]EndpointsHandler, 0),
+		}
+		info.ctx, info.cancel = context.WithCancel(context.Background())
+		w.watches[target.String()] = info
 	}
-	ctx, w.watching[target.String()] = context.WithCancel(ctx)
+	info := w.watches[target.String()]
 	w.mutex.Unlock()
 
-	watchEndpoints(w.k8sClientSet, ctx, target, handler)
+	info.AddHandler(handler)
+	info.WatchAndHandleOnce()
 }
 
-func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(respChan chan *envoy.DiscoveryResponse) EndpointsEventHandler {
-	f := func(target *EDSTarget, event *watch.Event) {
-		log.Printf("got event %v", event)
-
-		endpoints, ok := event.Object.(*v1.Endpoints)
-		if !ok {
-			log.Printf("Unexpected event obj type %v: ", event.Type)
-			return
-		}
+func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(respChan chan *envoy.DiscoveryResponse) EndpointsHandler {
+	f := func(target *EDSTarget, endpoints *v1.Endpoints) {
+		log.Printf("Got updated endpoints %v", endpoints)
 
 		resp, err := s.generateEDSResponse(target, endpoints)
 		if err != nil {
@@ -192,7 +255,7 @@ func (s *KubenvoyXDSServer) generateEDSResponse(target *EDSTarget, endpoints *v1
 
 	r := &envoy.DiscoveryResponse{
 		// How to pass this down ??
-		TypeUrl:   "type.googleapis.com/envoy.api.envoy.ClusterLoadAssignment",
+		TypeUrl:   "type.googleapis.com/envoy.api.v2.ClusterLoadAssignment",
 		Resources: []types.Any{*any},
 	}
 
@@ -246,7 +309,7 @@ func (s *KubenvoyXDSServer) handleDiscoveryRequest(r *envoy.DiscoveryRequest, st
 
 		wg.Add(1)
 		go func() {
-			s.watcher.WatchService(context.Background(), target, handler)
+			s.watcher.WatchService(target, handler)
 			wg.Done()
 		}()
 	}
