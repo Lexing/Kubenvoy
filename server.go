@@ -103,33 +103,46 @@ type K8ServiceEndpointsWatcher struct {
 }
 
 type EndpointsWatch struct {
-	clientset          *kubernetes.Clientset
-	target             *EDSTarget
-	started            uint32
-	startedMutex       sync.Mutex
-	ctx                context.Context
-	cancel             context.CancelFunc
-	handlers           []EndpointsHandler
-	mutex              sync.RWMutex
+	// K8S rest client
+	clientset *kubernetes.Clientset
+
+	// Target to watch
+	target *EDSTarget
+
+	// whether watch started, for control of starting only once
+	started      uint32
+	startedMutex sync.Mutex
+
+	// ctx for the watch
+	ctx context.Context
+
+	// cancel function for watch
+	cancel context.CancelFunc
+
+	// handlers added by callers & mutex to make it concurrently safe
+	handlers []EndpointsHandler
+	mutex    sync.RWMutex
+
+	// saved latestest events for new handlers
 	lastestEventpoints *v1.Endpoints
 }
 
 func (w *EndpointsWatch) watchAndHandle() {
-	log.Print("Inside watchAndHandle")
 	watchEndpoints(w.clientset, w.ctx, w.target, w.handleEvents)
 }
 
+// WatchAndHandleOnce starts watching for the target
 func (w *EndpointsWatch) WatchAndHandleOnce() {
-	log.Print("Here WatchAndHandle")
-	defer log.Print("After WatchAndHandle")
-
 	if atomic.LoadUint32(&w.started) == 1 {
 		return
 	}
-	// Slow-path.
+
 	w.startedMutex.Lock()
 	defer w.startedMutex.Unlock()
 	if w.started == 0 {
+		// This is a little bit different than sync.Once, that we
+		// set the number to 1 before actually calling the function.
+		// other calls won't block because of the change.
 		atomic.StoreUint32(&w.started, 1)
 		w.watchAndHandle()
 	}
@@ -138,7 +151,7 @@ func (w *EndpointsWatch) WatchAndHandleOnce() {
 func (w *EndpointsWatch) handleEvents(target *EDSTarget, event *watch.Event) {
 	endpoints, ok := event.Object.(*v1.Endpoints)
 	if !ok {
-		log.Print("unexpected event object kind %v", event.Object.GetObjectKind())
+		log.Printf("unexpected event object kind %v", event.Object.GetObjectKind())
 		return
 	}
 
@@ -237,6 +250,7 @@ func (s *KubenvoyXDSServer) listenRequests(stream envoy.EndpointDiscoveryService
 		}
 
 		if err := s.handleDiscoveryRequest(req, stream); err != nil {
+			log.Print(err)
 			return err
 		}
 	}

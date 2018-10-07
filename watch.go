@@ -54,10 +54,11 @@ func watchEndpoints(clientset *kubernetes.Clientset, ctx context.Context, target
 
 func watchResultsWithTicker(resultChan <-chan watch.Event, target *EDSTarget, handler EventHandler, duration time.Duration) {
 	ticker := time.NewTicker(duration)
+	start := time.Now()
 	for {
 		select {
 		case <-ticker.C:
-			log.Printf("Not able to get any results for %v after %v", target, duration)
+			log.Printf("Not able to get any results for %v after %v", target, time.Since(start))
 		case event, ok := <-resultChan:
 			ticker.Stop()
 			if !ok {
