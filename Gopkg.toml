@@ -34,3 +34,11 @@ required = ["github.com/envoyproxy/go-control-plane/envoy/api/v2"]
 [prune]
   go-tests = true
   unused-packages = true
+
+[[constraint]]
+  name = "github.com/google/uuid"
+  version = "1.0.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/minio/highwayhash"

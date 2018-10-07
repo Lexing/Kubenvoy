@@ -14,27 +14,28 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+// flags
 var (
-	address string
+	address        = flag.String("address", ":8090", "Address to listen on")
+	kubeConfigPath = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
+	kubeMasterURL  = flag.String("kubemaster", "", "master url")
 )
-
-func init() {
-	flag.StringVar(&address, "address", ":8090", "Address to listen on")
-}
 
 func main() {
 	flag.Parse()
 
+	server := kubenvoyxds.NewKubenvoyXDSServer(*kubeMasterURL, *kubeConfigPath)
+
 	rpcs := grpc.NewServer()
-	v2.RegisterEndpointDiscoveryServiceServer(rpcs, kubenvoyxds.NewKubenvoyXDSServer())
+	v2.RegisterEndpointDiscoveryServiceServer(rpcs, server)
 	reflection.Register(rpcs)
 
-	lis, err := net.Listen("tcp", address)
+	lis, err := net.Listen("tcp", *address)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	log.Printf("GRPC server listens on address %v\n", address)
+	log.Printf("Envoy XDS server listens on address %v\n", *address)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
