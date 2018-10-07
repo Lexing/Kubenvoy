@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-xds
+  labels:
+    service: envoy-xds
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8090
+  selector:
+    app: envoy-xds
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-xds
+  labels:
+    app: envoy-xds
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: envoy-xds
+  template:
+    metadata:
+      labels:
+        app: envoy-xds
+    spec:
+      containers:
+        - name: xds
+          image: lixingd/kubenvoyxds:latest
+          args: ["-address=:8090"]
+          resources:
+            requests:
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+          ports:
+            - containerPort: 8090
+              name: grpc
+          # livenessProbe:
+          #   httpGet:
+          #     path: /healthz
+          #     port: 8080
+          #   initialDelaySeconds: 3
+          #   periodSeconds: 3
+
