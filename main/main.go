@@ -3,14 +3,12 @@ package main
 import (
 	"flag"
 	"kubenvoyxds"
-	"log"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/envoyproxy/go-control-plane/envoy/api/v2"
-	"google.golang.org/grpc"
+	"github.com/golang/glog"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -24,28 +22,26 @@ var (
 func main() {
 	flag.Parse()
 
-	server := kubenvoyxds.NewKubenvoyXDSServer(*kubeMasterURL, *kubeConfigPath)
-
-	rpcs := grpc.NewServer()
-	v2.RegisterEndpointDiscoveryServiceServer(rpcs, server)
+	rpcs := kubenvoyxds.NewGRPCKubenvoyXDSServer(*kubeMasterURL, *kubeConfigPath)
 	reflection.Register(rpcs)
 
 	lis, err := net.Listen("tcp", *address)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		glog.Fatalf("failed to listen: %v", err)
 	}
 
-	log.Printf("Envoy XDS server listens on address %v\n", *address)
+	glog.Infof("Envoy XDS server listens on address %v\n", *address)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 		<-sig
-		rpcs.GracefulStop()
-		log.Print("Trying to gracefully stop server.")
+		glog.V(0).Infof("Stopping RPC server.")
+		rpcs.Stop()
+		glog.V(0).Infof("RPC server stopped")
 	}()
 
 	if err := rpcs.Serve(lis); err != nil {
-		log.Fatalf("failed to start rpc server: %v", err)
+		glog.Fatalf("failed to start rpc server: %v", err)
 	}
 }

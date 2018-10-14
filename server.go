@@ -3,245 +3,117 @@ package kubenvoyxds
 import (
 	"context"
 	"fmt"
-	"hash"
 	"io"
+	"kubenvoyxds/utils"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
+
+	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
-	"log"
-
 	envoy "github.com/envoyproxy/go-control-plane/envoy/api/v2"
-	envoyCore "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
-	envoyEndpoint "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
-	"github.com/gogo/protobuf/proto"
-	"github.com/gogo/protobuf/types"
-	"github.com/google/uuid"
-	"github.com/minio/highwayhash"
 )
 
-var hhash hash.Hash64
+const kubenvoyTargetPrefix = "kubenvoy-managed."
 
 type KubenvoyXDSServer struct {
 	k8sClientSet *kubernetes.Clientset
-	watcher      *K8ServiceEndpointsWatcher
+	watcher      *K8SResourceWatcher
 }
 
-type EDSTarget struct {
-	namespace string
-	service   string
-	port      int
-}
-
-func (t *EDSTarget) String() string {
-	return fmt.Sprintf("%v.%v:%v", t.service, t.namespace, t.port)
-}
-
-func NewKubenvoyXDSServer(masterURL string, kubeConfigPath string) *KubenvoyXDSServer {
+// NewK8sClientSet creates new K8sClientSet with given masterURL & kubeConfigPath
+func NewK8sClientSet(masterURL string, kubeConfigPath string) (*kubernetes.Clientset, error) {
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(masterURL, kubeConfigPath)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
+	}
+
+	return clientset, nil
+}
+
+func NewKubenvoyXDSServer(masterURL string, kubeConfigPath string) *KubenvoyXDSServer {
+	clientset, err := NewK8sClientSet(masterURL, kubeConfigPath)
+	if err != nil {
+		glog.Fatal(err)
 	}
 
 	server := &KubenvoyXDSServer{
 		k8sClientSet: clientset,
-		watcher:      NewK8ServiceEndpointsWatcher(clientset),
+		watcher:      NewK8EndpointsWatcher(clientset),
 	}
-
-	// respC := make(chan *envoy.DiscoveryResponse)
-	// go func() {
-	// 	for {
-	// 		log.Printf("Sending %v", <-respC)
-	// 	}
-	// }()
-	// target, err := parseTargetResourceName("checkinserver.default:8090")
-	// if err != nil {
-	// 	log.Print("failed to parse target.")
-	// } else {
-	// 	go server.watcher.WatchService(target, server.CreateEndpointsEventHandler(respC))
-	// }
-
-	// go func() {
-	// 	// time.Sleep(5 * time.Second)
-	// 	respC2 := make(chan *envoy.DiscoveryResponse)
-	// 	go func() {
-	// 		for {
-	// 			log.Printf("Sending222 %v", <-respC2)
-	// 		}
-	// 	}()
-	// 	target, err = parseTargetResourceName("checkinserver.default:8090")
-	// 	if err != nil {
-	// 		log.Print("failed to parse target.")
-	// 	} else {
-	// 		server.watcher.WatchService(target, server.CreateEndpointsEventHandler(respC2))
-	// 	}
-	// }()
 
 	return server
 }
 
-type K8ServiceEndpointsWatcher struct {
-	k8sClientSet *kubernetes.Clientset
-	watches      map[string]*EndpointsWatch
-	mutex        *sync.RWMutex
+func NewGRPCKubenvoyXDSServer(masterURL string, kubeConfigPath string) *grpc.Server {
+	s := NewKubenvoyXDSServer(masterURL, kubeConfigPath)
+	rpcs := grpc.NewServer()
+	envoy.RegisterEndpointDiscoveryServiceServer(rpcs, s)
+	envoy.RegisterClusterDiscoveryServiceServer(rpcs, s)
+	return rpcs
 }
 
-type EndpointsWatch struct {
-	// K8S rest client
-	clientset *kubernetes.Clientset
-
-	// Target to watch
-	target *EDSTarget
-
-	// whether watch started, for control of starting only once
-	started      uint32
-	startedMutex sync.Mutex
-
-	// ctx for the watch
-	ctx context.Context
-
-	// cancel function for watch
-	cancel context.CancelFunc
-
-	// handlers added by callers & mutex to make it concurrently safe
-	handlers []EndpointsHandler
-	mutex    sync.RWMutex
-
-	// saved latestest events for new handlers
-	lastestEventpoints *v1.Endpoints
-}
-
-func (w *EndpointsWatch) watchAndHandle() {
-	watchEndpoints(w.clientset, w.ctx, w.target, w.handleEvents)
-}
-
-// WatchAndHandleOnce starts watching for the target
-func (w *EndpointsWatch) WatchAndHandleOnce() {
-	if atomic.LoadUint32(&w.started) == 1 {
-		return
-	}
-
-	w.startedMutex.Lock()
-	defer w.startedMutex.Unlock()
-	if w.started == 0 {
-		// This is a little bit different than sync.Once, that we
-		// set the number to 1 before actually calling the function.
-		// other calls won't block because of the change.
-		atomic.StoreUint32(&w.started, 1)
-		w.watchAndHandle()
-	}
-}
-
-func (w *EndpointsWatch) handleEvents(target *EDSTarget, event *watch.Event) {
-	endpoints, ok := event.Object.(*v1.Endpoints)
-	if !ok {
-		log.Printf("unexpected event object kind %v", event.Object.GetObjectKind())
-		return
-	}
-
-	w.mutex.RLock()
-	handlers := w.handlers
-	w.lastestEventpoints = endpoints
-	w.mutex.RUnlock()
-	for _, h := range handlers {
-		h(target, endpoints)
-	}
-}
-
-func (w *EndpointsWatch) AddHandler(handler EndpointsHandler) {
-	w.mutex.Lock()
-	w.handlers = append(w.handlers, handler)
-	w.mutex.Unlock()
-	if w.lastestEventpoints != nil && w.target != nil {
-		handler(w.target, w.lastestEventpoints)
-	}
-}
-
-func NewK8ServiceEndpointsWatcher(clientset *kubernetes.Clientset) *K8ServiceEndpointsWatcher {
-	return &K8ServiceEndpointsWatcher{
-		k8sClientSet: clientset,
-		watches:      make(map[string]*EndpointsWatch),
-		mutex:        &sync.RWMutex{},
-	}
-}
-
-// EventHandler handles kubernetes event with a target context, those events are
-// usually from results of watch
-type EventHandler func(target *EDSTarget, events *watch.Event)
-
-// EndpointsHandler handles kubernetes endpoints with a target context, those events are
-// usually from results of watch
-type EndpointsHandler func(target *EDSTarget, endpoints *v1.Endpoints)
-
-// WatchService watches specified target and then process the events with handler. It blocks until
-// context is cancelled.
-func (w *K8ServiceEndpointsWatcher) WatchService(target *EDSTarget, handler EndpointsHandler) {
-	w.mutex.Lock()
-	_, exist := w.watches[target.String()]
-	if !exist {
-		info := &EndpointsWatch{
-			clientset: w.k8sClientSet,
-			target:    target,
-			handlers:  make([]EndpointsHandler, 0),
-		}
-		info.ctx, info.cancel = context.WithCancel(context.Background())
-		w.watches[target.String()] = info
-	}
-	info := w.watches[target.String()]
-	w.mutex.Unlock()
-
-	info.AddHandler(handler)
-	info.WatchAndHandleOnce()
-}
-
-func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(respChan chan *envoy.DiscoveryResponse) EndpointsHandler {
-	f := func(target *EDSTarget, endpoints *v1.Endpoints) {
-		log.Printf("Got updated endpoints %v", endpoints)
-
-		resp, err := s.generateEDSResponse(target, endpoints)
+func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryRequest, port int, stream *XDSStream) EndpointsHandler {
+	return func(endpoints *v1.Endpoints) {
+		resp, err := BuildEDSResponse(endpoints, uint32(port))
 		if err != nil {
-			log.Printf("Failed to generate EDS response: %v", err)
+			glog.Errorf("Failed to generate EDS response: %v", err)
 			return
 		}
 
-		// Note GRPC doesn't allow multiple go routines calling one stream.Send so
-		// we created a channel instead
-		respChan <- resp
-	}
+		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
+		if resp.VersionInfo == clientVersion {
+			glog.V(1).Infof("Version %v for endpoints %v:%v is same, not sending anything", clientVersion, endpoints.GetObjectMeta().GetName(), port)
+			return
+		}
 
-	return f
+		glog.V(2).Infof("New endpoints resp %v", endpoints)
+		glog.V(0).Infof("Send new endpoints config %v", resp)
+		stream.Send(resp)
+	}
 }
 
-// StreamEndpoints implements one method of GRPC Envoy XDS service.
-func (s *KubenvoyXDSServer) StreamEndpoints(stream envoy.EndpointDiscoveryService_StreamEndpointsServer) error {
-	if err := s.listenRequests(stream); err != nil {
-		log.Printf("error handling request stream %v", err)
-		return err
-	}
+func (s *KubenvoyXDSServer) CreateServicesHandler(r *envoy.DiscoveryRequest, stream *XDSStream) ServicesHandler {
+	return func(services []*v1.Service) {
+		resp, err := BuildCDSResponse(services)
+		if err != nil {
+			glog.Errorf("Failed to generate CDS response: %v", err)
+			return
+		}
 
-	return nil
+		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
+		if resp.VersionInfo == clientVersion {
+			glog.V(0).Infof("Version %v for clusters is same, not sending anything", clientVersion)
+			return
+		}
+
+		glog.V(2).Infof("New clusters resp %v", services)
+		glog.V(0).Infof("Send new clusters config %v built for services", resp)
+		stream.Send(resp)
+	}
 }
 
-func (s *KubenvoyXDSServer) listenRequests(stream envoy.EndpointDiscoveryService_StreamEndpointsServer) error {
+func (s *KubenvoyXDSServer) Stream(originalStream grpc.ServerStream) error {
+	stream := NewXDSStream(originalStream)
+	go stream.listen()
+
 	for {
 		req, err := stream.Recv()
-		log.Printf("Received request %v", req)
 		if err == io.EOF {
 			return nil
 		}
@@ -249,168 +121,98 @@ func (s *KubenvoyXDSServer) listenRequests(stream envoy.EndpointDiscoveryService
 			return err
 		}
 
-		if err := s.handleDiscoveryRequest(req, stream); err != nil {
-			log.Print(err)
-			return err
+		glog.V(3).Infof("handle discovery request [%v]", req.GetResourceNames())
+		switch req.GetTypeUrl() {
+		case "type.googleapis.com/envoy.api.v2.ClusterLoadAssignment":
+			s.handleEndpointsDiscoveryRequest(req, stream)
+		case "type.googleapis.com/envoy.api.v2.Cluster":
+			s.handleClusterDiscoveryRequest(req, stream)
+		default:
+			glog.Errorf("Got unsupported req type", req)
 		}
+		glog.V(3).Infof("handle discovery request done [%v]", req.GetResourceNames())
 	}
 }
 
-func (s *KubenvoyXDSServer) generateEDSResponse(target *EDSTarget, endpoints *v1.Endpoints) (*envoy.DiscoveryResponse, error) {
-	assignment, err := clusterLoadAssignmentFromEndpoint(target, endpoints)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cluster assignment for %v, skip", endpoints)
-	}
-
-	any, err := types.MarshalAny(assignment)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal cluster load assignment for %v, skip", assignment)
-	}
-
-	r := &envoy.DiscoveryResponse{
-		// How to pass this down ??
-		TypeUrl:   "type.googleapis.com/envoy.api.v2.ClusterLoadAssignment",
-		Resources: []types.Any{*any},
-	}
-
-	fp, err := ProtoFingerprint(r)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal discovery response %v. this should not happen", r)
-	}
-	r.VersionInfo = strconv.FormatUint(fp, 36)
-	r.Nonce = uuid.New().String()
-
-	return r, nil
-}
-
-func streamResponse(ctx context.Context, respChan chan *envoy.DiscoveryResponse, stream envoy.EndpointDiscoveryService_StreamEndpointsServer) {
-	// stream response
-	// this is mainly for concurency safety. grpc.Send must be called on same
-	// go routine.
-	for {
-		select {
-		case resp := <-respChan:
-			log.Printf("Sending response %v", resp)
-			err := stream.Send(resp)
-			if err != nil {
-				log.Printf("Error sending discovery response to client: %v", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *KubenvoyXDSServer) handleDiscoveryRequest(r *envoy.DiscoveryRequest, stream envoy.EndpointDiscoveryService_StreamEndpointsServer) error {
-	log.Printf("handleDiscoveryRequest %v", r.GetResourceNames())
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	respChan := make(chan *envoy.DiscoveryResponse)
-	go streamResponse(ctx, respChan, stream)
-
-	wg := sync.WaitGroup{}
-	errors := []error{}
-	for _, r := range r.GetResourceNames() {
-		target, err := parseTargetResourceName(r)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("Failed to parse resource %v: %v. Skipping it", r, err))
-			continue
-		}
-
-		handler := s.CreateEndpointsEventHandler(respChan)
-
-		wg.Add(1)
-		go func() {
-			s.watcher.WatchService(target, handler)
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-	log.Printf("handleDiscoveryRequest Done !!! %v", r.GetResourceNames())
-	if len(errors) != 0 {
-		return fmt.Errorf("Errors %v", errors)
-	}
-	return nil
+// StreamEndpoints implements one method of GRPC Envoy XDS service.
+func (s *KubenvoyXDSServer) StreamEndpoints(endpointStream envoy.EndpointDiscoveryService_StreamEndpointsServer) error {
+	return s.Stream(endpointStream)
 }
 
 // FetchEndpoints not implemented
 func (s *KubenvoyXDSServer) FetchEndpoints(ctx context.Context, r *envoy.DiscoveryRequest) (*envoy.DiscoveryResponse, error) {
-	log.Printf("Got FetchEndpoints requests %v", r)
+	glog.Errorf("Unsupported FetchEndpoints requests %v", r)
 	return nil, grpc.Errorf(codes.Unimplemented, "")
 }
 
-func clusterLoadAssignmentFromEndpoint(target *EDSTarget, endpoints *v1.Endpoints) (*envoy.ClusterLoadAssignment, error) {
-	type Address = envoyCore.Address
-	type SocketAddress = envoyCore.SocketAddress
-	type Address_SocketAddress = envoyCore.Address_SocketAddress
-	type SocketAddress_PortValue = envoyCore.SocketAddress_PortValue
-
-	lbendpoints := []envoyEndpoint.LbEndpoint{}
-	for _, subset := range endpoints.Subsets {
-		port := uint32(target.port)
-		for _, address := range subset.Addresses {
-			lbendpoints = append(lbendpoints, envoyEndpoint.LbEndpoint{
-				Endpoint: &envoyEndpoint.Endpoint{
-					Address: &Address{Address: &Address_SocketAddress{&SocketAddress{
-						Address:       address.IP,
-						PortSpecifier: &SocketAddress_PortValue{port},
-					},
-					}},
-				},
-			})
-		}
-	}
-
-	assignment := envoy.ClusterLoadAssignment{
-		Endpoints: []envoyEndpoint.LocalityLbEndpoints{
-			envoyEndpoint.LocalityLbEndpoints{
-				LbEndpoints: lbendpoints,
-			},
-		},
-	}
-
-	return &assignment, nil
+func (s *KubenvoyXDSServer) StreamClusters(clusterStream envoy.ClusterDiscoveryService_StreamClustersServer) error {
+	return s.Stream(clusterStream)
 }
 
-func parseTargetResourceName(name string) (*EDSTarget, error) {
-	unsupportedSchemeError := func(name string) error {
-		return fmt.Errorf("unsupported scheme name %v, the format must be srv.namespace:port", name)
+func (s *KubenvoyXDSServer) IncrementalClusters(stream envoy.ClusterDiscoveryService_IncrementalClustersServer) error {
+	glog.Errorf("Unsupported IncrementalClusters requests %v", stream)
+	return grpc.Errorf(codes.Unimplemented, "")
+}
+
+func (s *KubenvoyXDSServer) FetchClusters(ctx context.Context, r *envoy.DiscoveryRequest) (*envoy.DiscoveryResponse, error) {
+	glog.Errorf("Unsupported FetchClusters requests %v", r)
+	return nil, grpc.Errorf(codes.Unimplemented, "")
+}
+
+func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
+	stopChan := utils.StopChanOnTerminate()
+	for _, resourceName := range r.GetResourceNames() {
+		target, port, err := parseTargetResourceName(resourceName)
+		if err != nil {
+			glog.Errorf("Failed to parse resource %v: %v. Skip", r, err)
+			continue
+		}
+
+		handler := s.CreateEndpointsEventHandler(r, port, stream)
+		go s.watcher.WatchEndpoints(target.Namespace, target.Name, handler, stopChan)
 	}
+}
+
+func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
+	glog.V(0).Infof("HandleClusterDiscoveryRequest %v", r.GetResponseNonce())
+	stopChan := utils.StopChanOnTerminate()
+	handler := s.CreateServicesHandler(r, stream)
+	requirement, _ := labels.NewRequirement("kubenvoy-discovery", selection.Equals, []string{"true"})
+	labelSelector := labels.NewSelector().Add(*requirement)
+	go s.watcher.WatchServices(v1.NamespaceAll, labelSelector, handler, stopChan)
+}
+
+func parseTargetResourceName(name string) (target *v1.ObjectReference, port int, err error) {
+	unsupportedSchemeError := func(name string) error {
+		return fmt.Errorf("unsupported scheme name %v, the format must be kubenvoy-managed.srv.namespace:port", name)
+	}
+
+	if !strings.HasPrefix(name, kubenvoyTargetPrefix) {
+		err = unsupportedSchemeError(name)
+		return
+	}
+	name = strings.TrimPrefix(name, kubenvoyTargetPrefix)
 
 	strs := strings.Split(name, ":")
 	if len(strs) != 2 {
-		return nil, unsupportedSchemeError(name)
+		err = unsupportedSchemeError(name)
+		return
 	}
 
 	host, portStr := strs[0], strs[1]
 	strs = strings.Split(host, ".")
 	if len(strs) != 2 {
-		return nil, unsupportedSchemeError(name)
+		err = unsupportedSchemeError(name)
+		return
 	}
-	port, err := strconv.Atoi(portStr)
+	port, err = strconv.Atoi(portStr)
 	if err != nil {
-		return nil, unsupportedSchemeError(name)
+		err = unsupportedSchemeError(name)
+		return
 	}
 
-	return &EDSTarget{
-		service:   strs[0],
-		namespace: strs[1],
-		port:      port,
-	}, nil
-}
-
-func ProtoFingerprint(msg proto.Message) (uint64, error) {
-	key := []byte("my hobby bloa as a brother ok ?)")
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		return 0, err
-	}
-
-	hhash, _ = highwayhash.New64(key)
-	hhash.Reset()
-	hhash.Write(data)
-	return hhash.Sum64(), nil
+	return &v1.ObjectReference{
+		Name:      strs[0],
+		Namespace: strs[1],
+	}, port, nil
 }

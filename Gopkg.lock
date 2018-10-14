@@ -2,6 +2,14 @@
 
 
 [[projects]]
+  digest = "1:ffe9824d294da03b391f44e1ae8281281b4afc1bdaa9588c9097785e3af10cec"
+  name = "github.com/davecgh/go-spew"
+  packages = ["spew"]
+  pruneopts = "UT"
+  revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
+  version = "v1.1.1"
+
+[[projects]]
   digest = "1:3c32da00dbe96fa03fa19d4512680f7c0f4585531366e1564be140add7369751"
   name = "github.com/envoyproxy/go-control-plane"
   packages = [
@@ -122,6 +130,17 @@
   revision = "9cad4c3443a7200dd6400aef47183728de563a38"
 
 [[projects]]
+  digest = "1:8ec8d88c248041a6df5f6574b87bc00e7e0b493881dad2e7ef47b11dc69093b5"
+  name = "github.com/hashicorp/golang-lru"
+  packages = [
+    ".",
+    "simplelru",
+  ]
+  pruneopts = "UT"
+  revision = "20f1fb78b0740ba8c3cb143a61e86ba5c8669768"
+  version = "v0.5.0"
+
+[[projects]]
   digest = "1:8eb1de8112c9924d59bf1d3e5c26f5eaa2bfc2a5fcbb92dc1c2e4546d695f277"
   name = "github.com/imdario/mergo"
   packages = ["."]
@@ -199,7 +218,7 @@
   name = "golang.org/x/crypto"
   packages = ["ssh/terminal"]
   pruneopts = "UT"
-  revision = "e3636079e1a4c1f337f212cc5cd2aca108f6c900"
+  revision = "a92615f3c49003920a58dedcf32cf55022cefb8d"
 
 [[projects]]
   branch = "master"
@@ -216,7 +235,7 @@
     "trace",
   ]
   pruneopts = "UT"
-  revision = "146acd28ed5894421fb5aac80ca93bc1b1f46f87"
+  revision = "49bb7cea24b1df9410e1712aa6433dae904ff66a"
 
 [[projects]]
   branch = "master"
@@ -231,7 +250,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:c7fca7fb607a610caae0ea941ef3843a8022f6abb69b6cd646406253f1ed36f7"
+  digest = "1:9499e4b3284b485c77e0b08c20392d1add88a982fba2468fc01a45a025110df5"
   name = "golang.org/x/sys"
   packages = [
     "cpu",
@@ -239,7 +258,7 @@
     "windows",
   ]
   pruneopts = "UT"
-  revision = "4497e2df6f9e69048a54498c7affbbec3294ad47"
+  revision = "fa43e7bc11baaae89f3f902b2b4d832b68234844"
 
 [[projects]]
   digest = "1:a2ab62866c75542dd18d2b069fec854577a20211d7c0ea6ae746072a1dccdd18"
@@ -351,7 +370,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:eace0d597eb2baca8e43442bd14dcf34e07f4f61565f45f802248f97797ba45a"
+  digest = "1:da2ed83e7051554ed64cb49c57dd2d22eac2cdb80b7ab75d059085af0129e8e5"
   name = "k8s.io/api"
   packages = [
     "admissionregistration/v1alpha1",
@@ -387,16 +406,17 @@
     "storage/v1beta1",
   ]
   pruneopts = "UT"
-  revision = "ded30614edd77e131ec4fb340f049041faebe692"
+  revision = "e94254e9898f97b696849762ecb6e53856f3ab9f"
 
 [[projects]]
   branch = "master"
-  digest = "1:d3596870b579af5149f04859aaeb6ffa3b06a6b2e1e8ab3260609f68b10e9e70"
+  digest = "1:74e588bc3cf28e662bda7f2aade1bf776f254297fff3a893ffb050bf8d2f0001"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/errors",
     "pkg/api/meta",
     "pkg/api/resource",
+    "pkg/apis/meta/internalversion",
     "pkg/apis/meta/v1",
     "pkg/apis/meta/v1/unstructured",
     "pkg/apis/meta/v1beta1",
@@ -414,7 +434,9 @@
     "pkg/runtime/serializer/versioning",
     "pkg/selection",
     "pkg/types",
+    "pkg/util/cache",
     "pkg/util/clock",
+    "pkg/util/diff",
     "pkg/util/errors",
     "pkg/util/framer",
     "pkg/util/intstr",
@@ -425,16 +447,17 @@
     "pkg/util/sets",
     "pkg/util/validation",
     "pkg/util/validation/field",
+    "pkg/util/wait",
     "pkg/util/yaml",
     "pkg/version",
     "pkg/watch",
     "third_party/forked/golang/reflect",
   ]
   pruneopts = "UT"
-  revision = "e65edc4ced47a9ae9b5ae9c1c193dba1a5827b62"
+  revision = "dcb88206cd7f3654b224cbfc244e41126f52a13b"
 
 [[projects]]
-  digest = "1:51fd9ac9f2be10d79f5af101a7a1d758ef283fdb028a0d11198754bd3d4a6020"
+  digest = "1:5f64f1dfa0d1a59ea1b4830786dababffbd0ba4e6fb4c9eb4cdfb649bdd207a8"
   name = "k8s.io/client-go"
   packages = [
     "discovery",
@@ -479,18 +502,22 @@
     "rest",
     "rest/watch",
     "tools/auth",
+    "tools/cache",
     "tools/clientcmd",
     "tools/clientcmd/api",
     "tools/clientcmd/api/latest",
     "tools/clientcmd/api/v1",
     "tools/metrics",
+    "tools/pager",
     "tools/reference",
     "transport",
+    "util/buffer",
     "util/cert",
     "util/connrotation",
     "util/flowcontrol",
     "util/homedir",
     "util/integer",
+    "util/retry",
   ]
   pruneopts = "UT"
   revision = "1638f8970cefaa404ff3a62950f88b08292b2696"
@@ -503,7 +530,9 @@
     "github.com/envoyproxy/go-control-plane/envoy/api/v2",
     "github.com/envoyproxy/go-control-plane/envoy/api/v2/core",
     "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint",
+    "github.com/gogo/protobuf/proto",
     "github.com/gogo/protobuf/types",
+    "github.com/golang/glog",
     "github.com/google/uuid",
     "github.com/minio/highwayhash",
     "google.golang.org/grpc",
@@ -512,8 +541,11 @@
     "k8s.io/api/core/v1",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/fields",
-    "k8s.io/apimachinery/pkg/watch",
+    "k8s.io/apimachinery/pkg/labels",
+    "k8s.io/apimachinery/pkg/runtime",
+    "k8s.io/apimachinery/pkg/selection",
     "k8s.io/client-go/kubernetes",
+    "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/clientcmd",
   ]
   solver-name = "gps-cdcl"
