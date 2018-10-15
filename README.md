@@ -2,11 +2,11 @@
 ## Envoy with Kubernetes Discovery XDS & Config Reload
 
 
-Kubenvoy is envoy bundled with XDS for kubernetes, it's designed to work (mostly) as an API gateway, similar to ambassador. 
+Kubenvoy is an envoy version bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
 However, there are many different aspects for Kubenvoy from Ambassador 
 
-1. Kubenvoy is built with Envoy V2 grpc API 
-2. In Kubenvoy, we want to use native envoy config as much as possible, instead of creating a lot of annotation transformation.
+1. Kubenvoy's implementation is lighter, it's built with Envoy V2 grpc API 
+2. Configuration in Kubenvoy is much more flexible since we can reuse native envoy config as much as possible, especially for listeners and routes configs.
 
 
 ## To Start Use Kubenvoy
@@ -22,7 +22,7 @@ kubectl label svc [some service] kubenvoy-discovery=true
 ```
 
 
-3. Set up or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs, something like:
+3. Set up or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs formats, something like:
 ```
 apiVersion: v1
 kind: ConfigMap
