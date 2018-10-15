@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"kubenvoyxds/utils"
+	"kubenvoy/utils"
 	"strconv"
 	"strings"
 
@@ -224,8 +224,8 @@ func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequ
 func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
 	glog.V(0).Infof("HandleListenerDiscoveryRequest %v", r.GetResponseNonce())
 
-	s.listenerConfigWatcher.AddHandler(func(listener *envoy.Listener) {
-		resp, err := BuildLDSResponse(listener)
+	s.listenerConfigWatcher.AddHandler(func(listeners []envoy.Listener) {
+		resp, err := BuildLDSResponse(listeners)
 		if err != nil {
 			glog.Errorf("failed to build LDS response %v", err)
 			return

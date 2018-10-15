@@ -10,7 +10,7 @@
   version = "v1.1.1"
 
 [[projects]]
-  digest = "1:3c32da00dbe96fa03fa19d4512680f7c0f4585531366e1564be140add7369751"
+  digest = "1:ff4ab0249abd2d1847b520567a9a7bb8773908cd303805a0121ccb5e6ad5d4de"
   name = "github.com/envoyproxy/go-control-plane"
   packages = [
     "envoy/api/v2",
@@ -20,6 +20,11 @@
     "envoy/api/v2/endpoint",
     "envoy/api/v2/listener",
     "envoy/api/v2/route",
+    "envoy/config/bootstrap/v2",
+    "envoy/config/metrics/v2",
+    "envoy/config/overload/v2alpha",
+    "envoy/config/ratelimit/v2",
+    "envoy/config/trace/v2",
     "envoy/type",
   ]
   pruneopts = "UT"
@@ -539,6 +544,7 @@
     "github.com/envoyproxy/go-control-plane/envoy/api/v2",
     "github.com/envoyproxy/go-control-plane/envoy/api/v2/core",
     "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint",
+    "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v2",
     "github.com/fsnotify/fsnotify",
     "github.com/ghodss/yaml",
     "github.com/gogo/protobuf/jsonpb",

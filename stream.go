@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"kubenvoyxds/utils"
+	"kubenvoy/utils"
 
 	envoy "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	"github.com/golang/glog"

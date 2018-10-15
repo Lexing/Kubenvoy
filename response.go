@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"kubenvoyxds/utils"
+	"kubenvoy/utils"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +15,7 @@ import (
 	envoy "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	envoyCore "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	envoyEndpoint "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
+	envoyBootstrap "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v2"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/types"
 	"github.com/google/uuid"
@@ -235,14 +236,17 @@ func BuildCDSResponse(slice serviceSlice) (*envoy.DiscoveryResponse, error) {
 }
 
 // BuildLDSResponse builds a envoy LDS response with a slice of k8s services.
-func BuildLDSResponse(listener *envoy.Listener) (*envoy.DiscoveryResponse, error) {
-	msgs := []proto.Message{listener}
+func BuildLDSResponse(listeners []envoy.Listener) (*envoy.DiscoveryResponse, error) {
+	msgs := make([]proto.Message, len(listeners))
+	for i, listener := range listeners {
+		msgs[i] = &listener
+	}
 	return BuildDiscoveryResponseSlice("type.googleapis.com/envoy.api.v2.Listener", msgs)
 }
 
 type EnvoyListenerConfigWatcher struct {
-	path     string
-	listener *envoy.Listener
+	path      string
+	listeners []envoy.Listener
 
 	// file path to watch
 	filewatcher *fsnotify.Watcher
@@ -253,17 +257,17 @@ type EnvoyListenerConfigWatcher struct {
 	mutex    sync.RWMutex
 }
 
-func envoyListenerFromYAML(data []byte) (*envoy.Listener, error) {
+func envoyListenerFromYAML(data []byte) ([]envoy.Listener, error) {
 	data, err := yaml.YAMLToJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse YAML file to JSON file: %v", err)
 	}
-	listener := &envoy.Listener{}
-	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), listener); err != nil {
+	resources := &envoyBootstrap.Bootstrap_StaticResources{}
+	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), resources); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal listener %v", err)
 	}
 
-	return listener, nil
+	return resources.GetListeners(), nil
 }
 
 func NewEnvoyListenerConfigWatcher(path string) *EnvoyListenerConfigWatcher {
@@ -286,13 +290,13 @@ func NewEnvoyListenerConfigWatcher(path string) *EnvoyListenerConfigWatcher {
 	return w
 }
 
-type ListenerHandler func(*envoy.Listener)
+type ListenerHandler func([]envoy.Listener)
 
 func (m *EnvoyListenerConfigWatcher) AddHandler(h ListenerHandler) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	h(m.listener)
+	h(m.listeners)
 	m.handlers = append(m.handlers, h)
 }
 
@@ -302,13 +306,13 @@ func (m *EnvoyListenerConfigWatcher) loadConfig() error {
 		return fmt.Errorf("cannot read listener config file: %v", err)
 	}
 
-	listener, err := envoyListenerFromYAML(data)
+	listeners, err := envoyListenerFromYAML(data)
 	if err != nil {
 		return fmt.Errorf("failed to load listener config file: %v", err)
 	}
 
 	m.mutex.Lock()
-	m.listener = listener
+	m.listeners = listeners
 	m.mutex.Unlock()
 	return nil
 }
@@ -318,7 +322,7 @@ func (m *EnvoyListenerConfigWatcher) handle() {
 	defer m.mutex.Unlock()
 
 	for _, h := range m.handlers {
-		h(m.listener)
+		h(m.listeners)
 	}
 }
 

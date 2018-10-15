@@ -1,0 +1,233 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: kubenvoy
+rules:
+  - apiGroups: 
+      - ""
+    resources:
+      - services
+      - endpoints
+    verbs: 
+      - get
+      - list
+      - watch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubenvoy
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: kubenvoy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubenvoy
+subjects:
+- kind: ServiceAccount
+  name: kubenvoy
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubenvoy-xds
+  labels:
+    service: kubenvoy-xds
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+  selector:
+    app: kubenvoy-xds
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubenvoy-xds
+  labels:
+    app: kubenvoy-xds
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kubenvoy-xds
+  template:
+    metadata:
+      labels:
+        app: kubenvoy-xds
+    spec:
+      serviceAccountName: kubenvoy
+      containers:
+        - name: xds
+          image: lixingd/kubenvoyxds:latest
+          args: [
+            "-address=:80",
+            "-logtostderr",
+            "-v=0",
+          ]
+          resources:
+            requests:
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kubenvoy
+      volumes:
+        - name: config
+          configMap:
+            name: kubenvoy-xds-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubenvoy-envoy
+  labels:
+    service: kubenvoy-envoy
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-internal: 0.0.0.0/0
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      name: http
+  selector:
+    app: kubenvoy-envoy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubenvoy-envoy
+  labels:
+    app: kubenvoy-envoy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubenvoy-envoy
+  template:
+    metadata:
+      labels:
+        app: kubenvoy-envoy
+    spec:
+      containers:
+        - name: envoy
+          image: envoyproxy/envoy:v1.8.0
+          command: ["/usr/bin/dumb-init", "--"]
+          args:
+            [
+              "/usr/local/bin/envoy",
+              "--v2-config-only",
+              "--service-node $(POD_NAME)",
+              "--service-cluster k8-kubenvoy",
+              "-l info",
+              "-c /etc/envoy/envoy.yaml",
+            ]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            # envoy_admin
+            - containerPort: 9901
+            # main entrance
+            - containerPort: 80
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy/envoy.yaml
+              subPath: kubenvoy-envoy.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: kubenvoy-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubenvoy-config
+data:
+  kubenvoy-envoy.yaml: |
+    admin:
+      access_log_path: /tmp/admin_access.log
+      address:
+        socket_address:
+          protocol: TCP
+          address: 0.0.0.0
+          port_value: 9901
+    dynamic_resources:
+      lds_config:
+        api_config_source:
+          api_type: GRPC
+          grpc_services:
+            envoy_grpc:
+              cluster_name: xds_cluster
+      cds_config:
+        api_config_source:
+          api_type: GRPC
+          grpc_services:
+            envoy_grpc:
+              cluster_name: xds_cluster
+    static_resources:
+      clusters:
+        - name: xds_cluster
+          connect_timeout: 0.25s
+          type: LOGICAL_DNS
+          lb_policy: ROUND_ROBIN
+          http2_protocol_options: {}
+          load_assignment:
+            cluster_name: xds_cluster
+            endpoints:
+            - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: kubenvoy-xds
+                      port_value: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubenvoy-xds-config
+data:
+  listener.yaml: |
+    name: listener_xds
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+      - filters:
+          - name: envoy.http_connection_manager
+            config:
+              codec_type: auto
+              stat_prefix: ingress_http
+              route_config:
+                name: route
+                virtual_hosts:
+                  - name: backend
+                    domains:
+                      - "*"
+                    routes:
+                      - match:
+                          prefix: "/rpc.ShortUrlService/"
+                          grpc: {}
+                        route:
+                          prefix_rewrite: "/rpc.ShortUrlService/"
+                          weighted_clusters:
+                            clusters:
+                              - name: kubenvoy://shorturl-grpc.default:8090
+                                weight: 100
+              http_filters:
+                - name: envoy.router
+                  config: {}
+---
