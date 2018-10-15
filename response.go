@@ -138,10 +138,12 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 	type SocketAddress_PortValue = envoyCore.SocketAddress_PortValue
 
 	name := endpoints.GetObjectMeta().GetName()
+	namespace := endpoints.GetObjectMeta().GetNamespace()
+	clusterName := kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", name, namespace, targetPort)
 
 	if endpoints == nil {
 		return &envoy.ClusterLoadAssignment{
-			ClusterName: kubenvoyTargetPrefix + fmt.Sprintf("%v:%v", name, targetPort),
+			ClusterName: clusterName,
 			Endpoints:   []envoyEndpoint.LocalityLbEndpoints{},
 		}
 	}
@@ -167,7 +169,7 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 	}
 
 	return &envoy.ClusterLoadAssignment{
-		ClusterName: name,
+		ClusterName: clusterName,
 		Endpoints: []envoyEndpoint.LocalityLbEndpoints{
 			envoyEndpoint.LocalityLbEndpoints{
 				LbEndpoints: lbendpoints,
@@ -262,7 +264,6 @@ func envoyListenerFromYAML(data []byte) ([]envoy.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse YAML file to JSON file: %v", err)
 	}
-	glog.Errorf(string(data))
 	resources := envoyBootstrap.Bootstrap_StaticResources{}
 	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), &resources); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal listeners %v", err)

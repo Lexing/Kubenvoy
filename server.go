@@ -91,7 +91,7 @@ func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryReques
 		}
 
 		glog.V(2).Infof("New endpoints resp %v", endpoints)
-		glog.V(0).Infof("Send new endpoints config %v", resp)
+		glog.V(0).Infof("Send new endpoints resp %v", resp)
 		stream.Send(resp)
 	}
 }
@@ -111,7 +111,7 @@ func (s *KubenvoyXDSServer) CreateServicesHandler(r *envoy.DiscoveryRequest, str
 		}
 
 		glog.V(2).Infof("New clusters resp %v", services)
-		glog.V(0).Infof("Send new clusters config %v built for services", resp)
+		glog.V(0).Infof("Send new clusters config %v built for services", services)
 		stream.Send(resp)
 	}
 }
@@ -199,6 +199,7 @@ func (s *KubenvoyXDSServer) FetchClusters(ctx context.Context, r *envoy.Discover
 }
 
 func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
+	glog.V(0).Infof("HandleEndpointsDiscoveryRequest %v", r.GetResponseNonce())
 	stopChan := utils.StopChanOnTerminate()
 	for _, resourceName := range r.GetResourceNames() {
 		target, port, err := parseTargetResourceName(resourceName)
@@ -237,7 +238,7 @@ func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryReq
 			return
 		}
 
-		glog.V(0).Infof("Send new listener config %v ", resp)
+		glog.V(0).Infof("Send new listener config %v ", listeners)
 		stream.Send(resp)
 	})
 }
