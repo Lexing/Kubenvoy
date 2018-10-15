@@ -3,8 +3,11 @@ package kubenvoyxds
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"kubenvoyxds/utils"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -16,18 +19,34 @@ import (
 	"github.com/gogo/protobuf/types"
 	"github.com/google/uuid"
 	"k8s.io/api/core/v1"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/ghodss/yaml"
+	"github.com/gogo/protobuf/jsonpb"
 )
 
 var (
 	edsClusterName = flag.String("eds_cluster_name", "xds_cluster", "XDS cluster name.")
 )
 
+// Not supported unfortunately ..... for now
+func marshalAnyDeterministic(pb proto.Message) (*types.Any, error) {
+	const googleApis = "type.googleapis.com/"
+	b := make([]byte, 0, 1024*10)
+	buffer := proto.NewBuffer(b)
+	buffer.SetDeterministic(true)
+	if err := buffer.Marshal(pb); err != nil {
+		return nil, err
+	}
+	return &types.Any{TypeUrl: googleApis + proto.MessageName(pb), Value: buffer.Bytes()}, nil
+}
+
 func toAnySlice(messages []proto.Message) ([]types.Any, error) {
 	results := make([]types.Any, 0)
 	for _, m := range messages {
 		any, err := types.MarshalAny(m)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal message for %v", m)
+			return nil, fmt.Errorf("failed to marshal message for %v: %v", m, err)
 		}
 		results = append(results, *any)
 	}
@@ -78,7 +97,7 @@ func addVersionAndNonce(resp *envoy.DiscoveryResponse) error {
 func BuildDiscoveryResponseOne(typeURL string, msg proto.Message) (*envoy.DiscoveryResponse, error) {
 	resp, err := buildDiscoveryResponseOne(typeURL, msg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate discovery response or %v, skip", msg)
+		return nil, fmt.Errorf("failed to generate discovery response, skip\n error: %v", err)
 	}
 
 	if err := addVersionAndNonce(resp); err != nil {
@@ -91,7 +110,7 @@ func BuildDiscoveryResponseOne(typeURL string, msg proto.Message) (*envoy.Discov
 func BuildDiscoveryResponseSlice(typeURL string, msgs []proto.Message) (*envoy.DiscoveryResponse, error) {
 	resp, err := buildDiscoveryResponseSlice(typeURL, msgs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate discovery response or %v, skip", msgs)
+		return nil, fmt.Errorf("failed to generate discovery response, skip\n error: %v", err)
 	}
 
 	if err := addVersionAndNonce(resp); err != nil {
@@ -213,4 +232,151 @@ func BuildCDSResponse(slice serviceSlice) (*envoy.DiscoveryResponse, error) {
 		msgs[i] = c
 	}
 	return BuildDiscoveryResponseSlice("type.googleapis.com/envoy.api.v2.Cluster", msgs)
+}
+
+// BuildLDSResponse builds a envoy LDS response with a slice of k8s services.
+func BuildLDSResponse(listener *envoy.Listener) (*envoy.DiscoveryResponse, error) {
+	msgs := []proto.Message{listener}
+	return BuildDiscoveryResponseSlice("type.googleapis.com/envoy.api.v2.Listener", msgs)
+}
+
+type EnvoyListenerConfigWatcher struct {
+	path     string
+	listener *envoy.Listener
+
+	// file path to watch
+	filewatcher *fsnotify.Watcher
+
+	stopChan chan struct{}
+
+	handlers []ListenerHandler
+	mutex    sync.RWMutex
+}
+
+func envoyListenerFromYAML(data []byte) (*envoy.Listener, error) {
+	data, err := yaml.YAMLToJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse YAML file to JSON file: %v", err)
+	}
+	listener := &envoy.Listener{}
+	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), listener); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal listener %v", err)
+	}
+
+	return listener, nil
+}
+
+func NewEnvoyListenerConfigWatcher(path string) *EnvoyListenerConfigWatcher {
+	w := &EnvoyListenerConfigWatcher{
+		path:     path,
+		stopChan: make(chan struct{}),
+	}
+
+	var err error
+	w.filewatcher, err = fsnotify.NewWatcher()
+	if err != nil {
+		glog.Fatalf("failed to start watcher %v", err)
+	}
+
+	if err := w.Start(); err != nil {
+		glog.Fatalf("failed to watch envoy listener config %v", err)
+	}
+
+	w.filewatcher.Add(path)
+	return w
+}
+
+type ListenerHandler func(*envoy.Listener)
+
+func (m *EnvoyListenerConfigWatcher) AddHandler(h ListenerHandler) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	h(m.listener)
+	m.handlers = append(m.handlers, h)
+}
+
+func (m *EnvoyListenerConfigWatcher) loadConfig() error {
+	data, err := ioutil.ReadFile(m.path)
+	if err != nil {
+		return fmt.Errorf("cannot read listener config file: %v", err)
+	}
+
+	listener, err := envoyListenerFromYAML(data)
+	if err != nil {
+		return fmt.Errorf("failed to load listener config file: %v", err)
+	}
+
+	m.mutex.Lock()
+	m.listener = listener
+	m.mutex.Unlock()
+	return nil
+}
+
+func (m *EnvoyListenerConfigWatcher) handle() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	for _, h := range m.handlers {
+		h(m.listener)
+	}
+}
+
+func (m *EnvoyListenerConfigWatcher) loadAndHandle() error {
+	if err := m.loadConfig(); err != nil {
+		return fmt.Errorf("failed to load config %v", err)
+	}
+
+	m.handle()
+	return nil
+}
+
+func (m *EnvoyListenerConfigWatcher) Start() error {
+	if err := m.loadAndHandle(); err != nil {
+		return err
+	}
+
+	go func() {
+		// resync period pass as param
+		ticker := time.NewTicker(time.Second * 60)
+		for {
+			select {
+			case <-ticker.C:
+				if err := m.loadAndHandle(); err != nil {
+					glog.Error(err)
+				}
+			case <-m.stopChan:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-m.filewatcher.Events:
+				if !ok {
+					return
+				}
+				glog.Error("event:", event)
+				if event.Op&fsnotify.Remove == fsnotify.Remove {
+					m.filewatcher.Remove(event.Name)
+					m.filewatcher.Add(event.Name)
+					m.loadAndHandle()
+				}
+			case err, ok := <-m.filewatcher.Errors:
+				if !ok {
+					return
+				}
+				glog.Errorf("filewatcher error:", err)
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (m *EnvoyListenerConfigWatcher) Close() {
+	close(m.stopChan)
+	m.filewatcher.Close()
 }

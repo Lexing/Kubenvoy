@@ -22,11 +22,12 @@ import (
 	envoy "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 )
 
-const kubenvoyTargetPrefix = "kubenvoy-managed."
+const kubenvoyTargetPrefix = "kubenvoy://"
 
 type KubenvoyXDSServer struct {
-	k8sClientSet *kubernetes.Clientset
-	watcher      *K8SResourceWatcher
+	k8sClientSet          *kubernetes.Clientset
+	watcher               *K8SResourceWatcher
+	listenerConfigWatcher *EnvoyListenerConfigWatcher
 }
 
 // NewK8sClientSet creates new K8sClientSet with given masterURL & kubeConfigPath
@@ -65,6 +66,13 @@ func NewGRPCKubenvoyXDSServer(masterURL string, kubeConfigPath string) *grpc.Ser
 	rpcs := grpc.NewServer()
 	envoy.RegisterEndpointDiscoveryServiceServer(rpcs, s)
 	envoy.RegisterClusterDiscoveryServiceServer(rpcs, s)
+	envoy.RegisterListenerDiscoveryServiceServer(rpcs, s)
+
+	s.listenerConfigWatcher = NewEnvoyListenerConfigWatcher("/etc/kubenvoy/listener.yaml")
+	utils.OnTerminate(func() {
+		s.listenerConfigWatcher.Close()
+	})
+
 	return rpcs
 }
 
@@ -127,11 +135,42 @@ func (s *KubenvoyXDSServer) Stream(originalStream grpc.ServerStream) error {
 			s.handleEndpointsDiscoveryRequest(req, stream)
 		case "type.googleapis.com/envoy.api.v2.Cluster":
 			s.handleClusterDiscoveryRequest(req, stream)
+		case "type.googleapis.com/envoy.api.v2.Listener":
+			s.handleListenerDiscoveryRequest(req, stream)
+		// case "type.googleapis.com/envoy.api.v2.RouteConfiguration":
+		// s.handleClusterDiscoveryRequest(req, stream)
 		default:
 			glog.Errorf("Got unsupported req type", req)
 		}
 		glog.V(3).Infof("handle discovery request done [%v]", req.GetResourceNames())
 	}
+}
+
+// StreamListeners implements one method of GRPC Envoy XDS service.
+func (s *KubenvoyXDSServer) StreamListeners(stream envoy.ListenerDiscoveryService_StreamListenersServer) error {
+	return s.Stream(stream)
+}
+
+// FetchListeners not implemented
+func (s *KubenvoyXDSServer) FetchListeners(ctx context.Context, r *envoy.DiscoveryRequest) (*envoy.DiscoveryResponse, error) {
+	glog.Errorf("Unsupported FetchListeners requests %v", r)
+	return nil, grpc.Errorf(codes.Unimplemented, "")
+}
+
+// StreamRoutes implements one method of GRPC Envoy XDS service.
+func (s *KubenvoyXDSServer) StreamRoutes(stream envoy.RouteDiscoveryService_StreamRoutesServer) error {
+	return s.Stream(stream)
+}
+
+func (s *KubenvoyXDSServer) IncrementalRoutes(stream envoy.RouteDiscoveryService_IncrementalRoutesServer) error {
+	glog.Errorf("Unsupported IncrementalRoutes requests %v", stream)
+	return grpc.Errorf(codes.Unimplemented, "")
+}
+
+// FetchRoutes not implemented
+func (s *KubenvoyXDSServer) FetchRoutes(ctx context.Context, r *envoy.DiscoveryRequest) (*envoy.DiscoveryResponse, error) {
+	glog.Errorf("Unsupported FetchRoutes requests %v", r)
+	return nil, grpc.Errorf(codes.Unimplemented, "")
 }
 
 // StreamEndpoints implements one method of GRPC Envoy XDS service.
@@ -180,6 +219,27 @@ func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequ
 	requirement, _ := labels.NewRequirement("kubenvoy-discovery", selection.Equals, []string{"true"})
 	labelSelector := labels.NewSelector().Add(*requirement)
 	go s.watcher.WatchServices(v1.NamespaceAll, labelSelector, handler, stopChan)
+}
+
+func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
+	glog.V(0).Infof("HandleListenerDiscoveryRequest %v", r.GetResponseNonce())
+
+	s.listenerConfigWatcher.AddHandler(func(listener *envoy.Listener) {
+		resp, err := BuildLDSResponse(listener)
+		if err != nil {
+			glog.Errorf("failed to build LDS response %v", err)
+			return
+		}
+
+		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
+		if resp.VersionInfo == clientVersion {
+			glog.V(0).Infof("Version %v for listeners is same, not sending anything", clientVersion)
+			return
+		}
+
+		glog.V(0).Infof("Send new listener config %v ", resp)
+		stream.Send(resp)
+	})
 }
 
 func parseTargetResourceName(name string) (target *v1.ObjectReference, port int, err error) {

@@ -130,14 +130,14 @@ func (s *XDSStream) deleteAckChanForRespoonse(nonce string) {
 }
 
 func (s *XDSStream) send(resp *envoy.DiscoveryResponse, count int) error {
-	const MaximumRetrial = 3
+	const MaximumRetrial = 10
 	if count == MaximumRetrial {
 		return fmt.Errorf("failed to receive ACK/NAK from client for response %v, maximum retrials reached", resp)
 	}
 	s.responseChan <- resp
 
 	ack := s.getOrCreateAckChanForResponse(resp.GetNonce())
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(20 * time.Second)
 	for {
 		select {
 		case <-s.Context().Done():
@@ -176,8 +176,10 @@ func (s *XDSStream) AppliedVersion(typeURL, resourceNames string) string {
 // s.listen() must be called before any Send() calls
 func (s *XDSStream) Send(resp *envoy.DiscoveryResponse) error {
 	glog.V(2).Infof("Sending response %v", resp)
-	if err := s.send(resp, 0); err != nil {
-		glog.Errorf("failed to send new config to client %v", err)
-	}
+	go func() {
+		if err := s.send(resp, 0); err != nil {
+			glog.Errorf("failed to send new config to client %v", err)
+		}
+	}()
 	return nil
 }

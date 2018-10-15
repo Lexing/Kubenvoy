@@ -42,3 +42,11 @@ required = ["github.com/envoyproxy/go-control-plane/envoy/api/v2"]
 [[constraint]]
   branch = "master"
   name = "github.com/minio/highwayhash"
+
+[[constraint]]
+  name = "github.com/gogo/protobuf"
+  version = "1.1.1"
+
+[[constraint]]
+  name = "github.com/fsnotify/fsnotify"
+  version = "1.4.7"
