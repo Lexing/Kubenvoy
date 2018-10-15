@@ -9,7 +9,7 @@ However, there are many different aspects for Kubenvoy from Ambassador
 2. Configuration in Kubenvoy is much more flexible since we can reuse native envoy config as much as possible, especially for listeners and routes configs.
 
 
-## To Start Use Kubenvoy
+## To start use Kubenvoy
 
 1. Start Kubenvoy in your Kubernetes cluster. Examples can be seen below, two deployments will be brought up: kubenvoy-envoy & kubenvoy-xds
 ```
