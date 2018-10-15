@@ -343,29 +343,14 @@ func (m *EnvoyListenerConfigWatcher) Start() error {
 	}
 
 	go func() {
-		// resync period pass as param
-		ticker := time.NewTicker(time.Second * 60)
-		for {
-			select {
-			case <-ticker.C:
-				if err := m.loadAndHandle(); err != nil {
-					glog.Error(err)
-				}
-			case <-m.stopChan:
-				return
-			}
-		}
-	}()
-
-	go func() {
 		for {
 			select {
 			case event, ok := <-m.filewatcher.Events:
 				if !ok {
 					return
 				}
-				glog.Error("event:", event)
 				if event.Op&fsnotify.Remove == fsnotify.Remove {
+					glog.V(0).Info("Listener config file updated.")
 					m.filewatcher.Remove(event.Name)
 					m.filewatcher.Add(event.Name)
 					m.loadAndHandle()

@@ -86,12 +86,12 @@ func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryReques
 
 		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
 		if resp.VersionInfo == clientVersion {
-			glog.V(1).Infof("Version %v for endpoints %v:%v is same, not sending anything", clientVersion, endpoints.GetObjectMeta().GetName(), port)
+			glog.V(0).Infof("Built endpoint version %v for %v:%v is same as client %s, not sending anything", clientVersion, endpoints.GetObjectMeta().GetName(), port, r.GetNode())
 			return
 		}
 
 		glog.V(2).Infof("New endpoints resp %v", endpoints)
-		glog.V(0).Infof("Send new endpoints resp %v", resp)
+		glog.V(0).Infof("Sending client %s new endpoints config %s ", r.GetNode(), resp)
 		stream.Send(resp)
 	}
 }
@@ -106,12 +106,12 @@ func (s *KubenvoyXDSServer) CreateServicesHandler(r *envoy.DiscoveryRequest, str
 
 		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
 		if resp.VersionInfo == clientVersion {
-			glog.V(0).Infof("Version %v for clusters is same, not sending anything", clientVersion)
+			glog.V(0).Infof("Built service version %v for clusters is same as client %v, not sending anything", clientVersion, r.GetNode())
 			return
 		}
 
 		glog.V(2).Infof("New clusters resp %v", services)
-		glog.V(0).Infof("Send new clusters config %v built for services", services)
+		glog.V(0).Infof("Sending client %s new clusters config %s ", r.GetNode(), resp)
 		stream.Send(resp)
 	}
 }
@@ -199,7 +199,7 @@ func (s *KubenvoyXDSServer) FetchClusters(ctx context.Context, r *envoy.Discover
 }
 
 func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
-	glog.V(0).Infof("HandleEndpointsDiscoveryRequest %v", r.GetResponseNonce())
+	glog.V(0).Infof("HandleEndpointsDiscoveryRequest [%v] %v", r.GetResourceNames(), r.GetResponseNonce())
 	stopChan := utils.StopChanOnTerminate()
 	for _, resourceName := range r.GetResourceNames() {
 		target, port, err := parseTargetResourceName(resourceName)
@@ -214,7 +214,7 @@ func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRe
 }
 
 func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
-	glog.V(0).Infof("HandleClusterDiscoveryRequest %v", r.GetResponseNonce())
+	glog.V(0).Infof("HandleClusterDiscoveryRequest [%v] %v", r.GetResourceNames(), r.GetResponseNonce())
 	stopChan := utils.StopChanOnTerminate()
 	handler := s.CreateServicesHandler(r, stream)
 	requirement, _ := labels.NewRequirement("kubenvoy-discovery", selection.Equals, []string{"true"})
@@ -223,7 +223,7 @@ func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequ
 }
 
 func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
-	glog.V(0).Infof("HandleListenerDiscoveryRequest %v", r.GetResponseNonce())
+	glog.V(0).Infof("HandleListenerDiscoveryRequest [%v] %v", r.GetResourceNames(), r.GetResponseNonce())
 
 	s.listenerConfigWatcher.AddHandler(func(listeners []envoy.Listener) {
 		resp, err := BuildLDSResponse(listeners)
@@ -234,11 +234,11 @@ func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryReq
 
 		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
 		if resp.VersionInfo == clientVersion {
-			glog.V(0).Infof("Version %v for listeners is same, not sending anything", clientVersion)
+			glog.V(0).Infof("Built listeners version %v is same as client %s, not sending anything", clientVersion, r.GetNode())
 			return
 		}
 
-		glog.V(0).Infof("Send new listener config %v ", listeners)
+		glog.V(0).Infof("Sending client %s new listener config %s ", r.GetNode(), listeners)
 		stream.Send(resp)
 	})
 }
