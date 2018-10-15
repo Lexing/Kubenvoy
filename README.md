@@ -31,7 +31,7 @@ metadata:
 data:
   listeners.yaml: |
     listeners:
-      - name: listener_internal
+      - name: listener_1
         address:
           socket_address:
             protocol: TCP
@@ -62,7 +62,7 @@ data:
                   http_filters:
                     - name: envoy.router
                       config: {}
-      - name: listener_public
+      - name: listener_2
         address:
           socket_address:
             protocol: TCP
