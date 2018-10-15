@@ -30,39 +30,7 @@ metadata:
   name: kubenvoy-xds-config
 data:
   listeners.yaml: |
-    listeners:
       - name: listener_1
-        address:
-          socket_address:
-            protocol: TCP
-            address: 0.0.0.0
-            port_value: 8088
-        filter_chains:
-          - filters:
-              - name: envoy.http_connection_manager
-                config:
-                  codec_type: auto
-                  stat_prefix: ingress_http
-                  route_config:
-                    name: route
-                    virtual_hosts:
-                      - name: backend
-                        domains:
-                          - "*"
-                        routes:
-                          - match:
-                              prefix: "/rpc.ShortUrlService/"
-                              grpc: {}
-                            route:
-                              prefix_rewrite: "/rpc.ShortUrlService/"
-                              weighted_clusters:
-                                clusters:
-                                  - name: kubenvoy://some-service.default:8090
-                                    weight: 100
-                  http_filters:
-                    - name: envoy.router
-                      config: {}
-      - name: listener_2
         address:
           socket_address:
             protocol: TCP
@@ -82,7 +50,14 @@ data:
                           - "*"
                         routes:
                           - match:
-                              prefix: "/"
+                              prefix: "/bcd/"
+                            route:
+                              weighted_clusters:
+                                clusters:
+                                  - name: kubenvoy://some-svc.namespace:80
+                                    weight: 100
+                          - match:
+                              prefix: "/abc/"
                             route:
                               weighted_clusters:
                                 clusters:
