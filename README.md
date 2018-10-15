@@ -1,5 +1,5 @@
 # Kubenvoy
-## Envoy with Kubernetes Discovery XDS & Config Reload
+## Envoy with Kubernetes Discovery XDS & Config Auto Reload
 
 
 Kubenvoy is an envoy version bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
