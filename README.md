@@ -2,7 +2,7 @@
 ## Envoy with Kubernetes Discovery XDS & Config Auto Reload
 
 
-Kubenvoy is an envoy version bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
+Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
 However, there are many different aspects for Kubenvoy from Ambassador 
 
 1. Kubenvoy's implementation is lighter, it's built with Envoy V2 grpc API 
