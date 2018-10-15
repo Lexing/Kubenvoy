@@ -216,37 +216,38 @@ metadata:
 data:
   listeners.yaml: |
     listeners:
-      - name: listener_internal
-        address:
-          socket_address:
-            protocol: TCP
-            address: 0.0.0.0
-            port_value: 8088
-        filter_chains:
-          - filters:
-              - name: envoy.http_connection_manager
-                config:
-                  codec_type: auto
-                  stat_prefix: ingress_http
-                  route_config:
-                    name: route
-                    virtual_hosts:
-                      - name: backend
-                        domains:
-                          - "*"
-                        routes:
-                          - match:
-                              prefix: "/rpc.ShortUrlService/"
-                              grpc: {}
-                            route:
-                              prefix_rewrite: "/rpc.ShortUrlService/"
-                              weighted_clusters:
-                                clusters:
-                                  - name: kubenvoy://some-internal-svc.namespace:80
-                                    weight: 100
-                  http_filters:
-                    - name: envoy.router
-                      config: {}
+      # Seems envoy has some problems register multiple listeners
+      # - name: listener_internal
+      #   address:
+      #     socket_address:
+      #       protocol: TCP
+      #       address: 0.0.0.0
+      #       port_value: 8088
+      #   filter_chains:
+      #     - filters:
+      #         - name: envoy.http_connection_manager
+      #           config:
+      #             codec_type: auto
+      #             stat_prefix: ingress_http
+      #             route_config:
+      #               name: route
+      #               virtual_hosts:
+      #                 - name: backend
+      #                   domains:
+      #                     - "*"
+      #                   routes:
+      #                     - match:
+      #                         prefix: "/rpc.ShortUrlService/"
+      #                         grpc: {}
+      #                       route:
+      #                         prefix_rewrite: "/rpc.ShortUrlService/"
+      #                         weighted_clusters:
+      #                           clusters:
+      #                             - name: kubenvoy://some-internal-svc.namespace:80
+      #                               weight: 100
+      #             http_filters:
+      #               - name: envoy.router
+      #                 config: {}
       - name: listener_public
         address:
           socket_address:

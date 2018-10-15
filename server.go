@@ -238,7 +238,7 @@ func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryReq
 			return
 		}
 
-		glog.V(0).Infof("Sending client %s new listener config %s ", r.GetNode(), listeners)
+		glog.V(0).Infof("Sending client %s new listener config \n: %s ", r.GetNode(), listeners)
 		stream.Send(resp)
 	})
 }
