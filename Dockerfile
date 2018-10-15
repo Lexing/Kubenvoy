@@ -6,11 +6,11 @@ ENV GOARCH=amd64
 
 # This can speed up future builds because of cache, only rebuild when vendors are
 # added.
-ADD vendor /go/src/kubenvoyxds/vendor/
-RUN go build -i kubenvoyxds/vendor/...
+ADD vendor /go/src/kubenvoy/vendor/
+RUN go build -i kubenvoy/vendor/...
 
-ADD . /go/src/kubenvoyxds
-WORKDIR /go/src/kubenvoyxds
+ADD . /go/src/kubenvoy
+WORKDIR /go/src/kubenvoy
 
 
 RUN go build -v -o /go/bin/main main/main.go

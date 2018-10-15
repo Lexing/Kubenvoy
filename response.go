@@ -262,9 +262,10 @@ func envoyListenerFromYAML(data []byte) ([]envoy.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse YAML file to JSON file: %v", err)
 	}
-	resources := &envoyBootstrap.Bootstrap_StaticResources{}
-	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), resources); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal listener %v", err)
+	glog.Errorf(string(data))
+	resources := envoyBootstrap.Bootstrap_StaticResources{}
+	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), &resources); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal listeners %v", err)
 	}
 
 	return resources.GetListeners(), nil
@@ -303,12 +304,12 @@ func (m *EnvoyListenerConfigWatcher) AddHandler(h ListenerHandler) {
 func (m *EnvoyListenerConfigWatcher) loadConfig() error {
 	data, err := ioutil.ReadFile(m.path)
 	if err != nil {
-		return fmt.Errorf("cannot read listener config file: %v", err)
+		return fmt.Errorf("cannot read listeners config file: %v", err)
 	}
 
 	listeners, err := envoyListenerFromYAML(data)
 	if err != nil {
-		return fmt.Errorf("failed to load listener config file: %v", err)
+		return fmt.Errorf("failed to load listeners config file: %v", err)
 	}
 
 	m.mutex.Lock()

@@ -68,7 +68,7 @@ func NewGRPCKubenvoyXDSServer(masterURL string, kubeConfigPath string) *grpc.Ser
 	envoy.RegisterClusterDiscoveryServiceServer(rpcs, s)
 	envoy.RegisterListenerDiscoveryServiceServer(rpcs, s)
 
-	s.listenerConfigWatcher = NewEnvoyListenerConfigWatcher("/etc/kubenvoy/listener.yaml")
+	s.listenerConfigWatcher = NewEnvoyListenerConfigWatcher("/etc/kubenvoy/listeners.yaml")
 	utils.OnTerminate(func() {
 		s.listenerConfigWatcher.Close()
 	})
