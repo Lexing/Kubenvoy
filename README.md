@@ -1,15 +1,21 @@
 # Kubenvoy
-## Envoy with Kubernetes Discovery XDS & Config Auto Reload
+## Envoy with Kubernetes Discovery & config auto reloading
 
 
-Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
-However, there are many different aspects for Kubenvoy from Ambassador 
+Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as edge or service proxy with built-in discovery. Some good applications are API-gateways & load balancers. 
 
-1. Kubenvoy's implementation is lighter, it's built with Envoy V2 grpc API 
-2. Configuration in Kubenvoy is much more flexible since we can reuse native envoy config as much as possible, especially for listeners and routes configs.
+It was built simply becaucuse Ambassador is not good / flexible enough, serveral benefits of Kubenvoy are 
+
+1. Kubenvoy has true load balancing, it provides envoy service endpoints rather than DNS based cluster endpoints. Ambassador doesn't really resolve endpoints so traffics are not balanced across pods for the same services (if you don't want to use Headless service)
+
+2. Kubenvoy's implementation is lighter and more intuitive, it's built with native Envoy V2 API (grpc version)
+
+3. Configuration for Kubenvoy is much more flexible since native envoy config was adopted so we can resuse native config as much as possible, especially for listeners and routes configs.
+
+However, Kubenvoy is also more than an API-gateway, people can use it as in-cluster load balancers as well, e.g. for GRPC.
 
 
-## To Start Use Kubenvoy
+## To start use Kubenvoy
 
 1. Start Kubenvoy in your Kubernetes cluster. Examples can be seen below, two deployments will be brought up: kubenvoy-envoy & kubenvoy-xds
 ```
@@ -30,39 +36,7 @@ metadata:
   name: kubenvoy-xds-config
 data:
   listeners.yaml: |
-    listeners:
       - name: listener_1
-        address:
-          socket_address:
-            protocol: TCP
-            address: 0.0.0.0
-            port_value: 8088
-        filter_chains:
-          - filters:
-              - name: envoy.http_connection_manager
-                config:
-                  codec_type: auto
-                  stat_prefix: ingress_http
-                  route_config:
-                    name: route
-                    virtual_hosts:
-                      - name: backend
-                        domains:
-                          - "*"
-                        routes:
-                          - match:
-                              prefix: "/rpc.ShortUrlService/"
-                              grpc: {}
-                            route:
-                              prefix_rewrite: "/rpc.ShortUrlService/"
-                              weighted_clusters:
-                                clusters:
-                                  - name: kubenvoy://some-service.default:8090
-                                    weight: 100
-                  http_filters:
-                    - name: envoy.router
-                      config: {}
-      - name: listener_2
         address:
           socket_address:
             protocol: TCP
@@ -82,7 +56,14 @@ data:
                           - "*"
                         routes:
                           - match:
-                              prefix: "/"
+                              prefix: "/bcd/"
+                            route:
+                              weighted_clusters:
+                                clusters:
+                                  - name: kubenvoy://some-svc.namespace:80
+                                    weight: 100
+                          - match:
+                              prefix: "/abc/"
                             route:
                               weighted_clusters:
                                 clusters:
