@@ -2,11 +2,17 @@
 ## Envoy with Kubernetes Discovery & config auto reloading
 
 
-Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as API gateway, similar to Ambassador. 
-However, there are many different aspects for Kubenvoy from Ambassador 
+Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as edge or service proxy with built-in discovery. Some good applications are API-gateways & load balancers. 
 
-1. Kubenvoy's implementation is lighter, it's built with Envoy V2 grpc API 
-2. Configuration in Kubenvoy is much more flexible since we can reuse native envoy config as much as possible, especially for listeners and routes configs.
+It was built simply becaucuse Ambassador is not good / flexible enough, serveral benefits of Kubenvoy are 
+
+1. Kubenvoy has true load balancing, it provides envoy service endpoints rather than DNS based cluster endpoints. Ambassador doesn't really resolve endpoints so traffics are not balanced across pods for the same services (if you don't want to use Headless service)
+
+2. Kubenvoy's implementation is lighter and more intuitive, it's built with native Envoy V2 API (grpc version)
+
+3. Configuration for Kubenvoy is much more flexible since native envoy config was adopted so we can resuse native config as much as possible, especially for listeners and routes configs.
+
+However, Kubenvoy is also more than an API-gateway, people can use it as in-cluster load balancers as well, e.g. for GRPC.
 
 
 ## To start use Kubenvoy
