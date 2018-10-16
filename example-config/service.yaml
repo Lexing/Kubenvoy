@@ -85,22 +85,23 @@ spec:
           configMap:
             name: kubenvoy-xds-config
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: kubenvoy-envoy-internal
-  labels:
-    service: kubenvoy-envoy
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-internal: 0.0.0.0/0
-    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-spec:
-  type: LoadBalancer
-  ports:
-    - port: 8088
-      name: http
-  selector:
-    app: kubenvoy-envoy
+# Uncomment this one for another port 
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: kubenvoy-envoy-internal
+#   labels:
+#     service: kubenvoy-envoy
+#   annotations:
+#     service.beta.kubernetes.io/aws-load-balancer-internal: 0.0.0.0/0
+#     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+# spec:
+#   type: LoadBalancer
+#   ports:
+#     - port: 8088
+#       name: http
+#   selector:
+#     app: kubenvoy-envoy
 ---
 apiVersion: v1
 kind: Service
