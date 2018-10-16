@@ -4,7 +4,7 @@
 
 Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as edge or service proxy with built-in discovery. Some good applications are API-gateways & load balancers. 
 
-It was built simply becaucuse Ambassador is not good / flexible enough, serveral benefits of Kubenvoy are 
+It was built simply becaucuse [Ambassador](https://www.getambassador.io/) is not good / flexible enough, serveral benefits of Kubenvoy are 
 
 1. Kubenvoy has true load balancing, it provides envoy service endpoints rather than DNS based cluster endpoints. Ambassador doesn't really resolve endpoints so traffics are not balanced across pods for same service (if you don't want to use Headless service in Kubernetes)
 
