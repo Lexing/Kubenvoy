@@ -22,13 +22,13 @@ However, Kubenvoy is also more than an API-gateway, people can use it as in-clus
 kubectl apply -f example-config/service.yaml
 ```
 
-2. Make your service discoverable by Kubenvoy with following labels, you can also use other methods, e.g `kubectl apply` to add labels too
+2. To make your Kubernetes service discoverable by Kubenvoy, apply label `kubenvoy-discovery=true` to the service with `kubectl label` or `kubectl apply`
 ```
 kubectl label svc [some service] kubenvoy-discovery=true
 ```
 
 
-3. Set up or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs formats, something like:
+3. Setup or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs formats. Configs will be automatically updated for envoy. Following is an example of one listener config, specs are [here](https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/lds.proto#envoy-api-msg-listener)
 ```
 apiVersion: v1
 kind: ConfigMap
