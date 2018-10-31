@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"kubenvoy"
+
 	"net"
 	"os"
 	"os/signal"
@@ -22,7 +23,7 @@ var (
 func main() {
 	flag.Parse()
 
-	rpcs := kubenvoyxds.NewGRPCKubenvoyXDSServer(*kubeMasterURL, *kubeConfigPath)
+	rpcs := kubenvoy.NewGRPCKubenvoyXDSServer(*kubeMasterURL, *kubeConfigPath)
 	reflection.Register(rpcs)
 
 	lis, err := net.Listen("tcp", *address)

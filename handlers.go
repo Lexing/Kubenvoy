@@ -1,4 +1,4 @@
-package kubenvoyxds
+package kubenvoy
 
 import (
 	"sort"

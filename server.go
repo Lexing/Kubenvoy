@@ -1,4 +1,4 @@
-package kubenvoyxds
+package kubenvoy
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
@@ -116,6 +117,25 @@ func (s *KubenvoyXDSServer) CreateServicesHandler(r *envoy.DiscoveryRequest, str
 	}
 }
 
+func (s *KubenvoyXDSServer) CreateListenerHandler(r *envoy.DiscoveryRequest, stream *XDSStream) ListenerHandler {
+	return func(listeners []envoy.Listener) {
+		resp, err := BuildLDSResponse(listeners)
+		if err != nil {
+			glog.Errorf("failed to build LDS response %v", err)
+			return
+		}
+
+		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
+		if resp.VersionInfo == clientVersion {
+			glog.V(0).Infof("Built listeners version %v is same as client %s, not sending anything", clientVersion, r.GetNode())
+			return
+		}
+
+		glog.V(0).Infof("Sending client %s new listener config \n: %s ", r.GetNode(), listeners)
+		stream.Send(resp)
+	}
+}
+
 func (s *KubenvoyXDSServer) Stream(originalStream grpc.ServerStream) error {
 	stream := NewXDSStream(originalStream)
 	go stream.listen()
@@ -132,7 +152,10 @@ func (s *KubenvoyXDSServer) Stream(originalStream grpc.ServerStream) error {
 		glog.V(3).Infof("handle discovery request [%v]", req.GetResourceNames())
 		switch req.GetTypeUrl() {
 		case "type.googleapis.com/envoy.api.v2.ClusterLoadAssignment":
-			s.handleEndpointsDiscoveryRequest(req, stream)
+			err := s.handleEndpointsDiscoveryRequest(req, stream)
+			if err != nil {
+				return err
+			}
 		case "type.googleapis.com/envoy.api.v2.Cluster":
 			s.handleClusterDiscoveryRequest(req, stream)
 		case "type.googleapis.com/envoy.api.v2.Listener":
@@ -198,19 +221,42 @@ func (s *KubenvoyXDSServer) FetchClusters(ctx context.Context, r *envoy.Discover
 	return nil, grpc.Errorf(codes.Unimplemented, "")
 }
 
-func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
+func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) error {
 	glog.V(0).Infof("HandleEndpointsDiscoveryRequest [%v] %v", r.GetResourceNames(), r.GetResponseNonce())
 	stopChan := utils.StopChanOnTerminate()
 	for _, resourceName := range r.GetResourceNames() {
-		target, port, err := parseTargetResourceName(resourceName)
+		target, svcPort, err := parseTargetResourceName(resourceName)
 		if err != nil {
-			glog.Errorf("Failed to parse resource %v: %v. Skip", r, err)
+			err := fmt.Errorf("Failed to parse resource %v: %v. Skip", r, err)
+			glog.Error(err)
+			return err
+		}
+
+		svc, err := s.k8sClientSet.CoreV1().Services(target.Namespace).Get(target.Name, metav1.GetOptions{})
+		if err != nil {
+			err := fmt.Errorf("Failed to get svc %v from k8s", target, err)
+			glog.Error(err)
+			return err
+		}
+
+		var targetPort int
+		for _, p := range svc.Spec.Ports {
+			if p.Port == int32(svcPort) {
+				targetPort = p.TargetPort.IntValue()
+				break
+			}
+		}
+
+		if targetPort == 0 {
+			glog.Errorf("Failed to find target port for port %v in %v", svcPort, target)
 			continue
 		}
 
-		handler := s.CreateEndpointsEventHandler(r, port, stream)
+		handler := s.CreateEndpointsEventHandler(r, targetPort, stream)
 		go s.watcher.WatchEndpoints(target.Namespace, target.Name, handler, stopChan)
 	}
+
+	return nil
 }
 
 func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
@@ -224,23 +270,8 @@ func (s *KubenvoyXDSServer) handleClusterDiscoveryRequest(r *envoy.DiscoveryRequ
 
 func (s *KubenvoyXDSServer) handleListenerDiscoveryRequest(r *envoy.DiscoveryRequest, stream *XDSStream) {
 	glog.V(0).Infof("HandleListenerDiscoveryRequest [%v] %v", r.GetResourceNames(), r.GetResponseNonce())
-
-	s.listenerConfigWatcher.AddHandler(func(listeners []envoy.Listener) {
-		resp, err := BuildLDSResponse(listeners)
-		if err != nil {
-			glog.Errorf("failed to build LDS response %v", err)
-			return
-		}
-
-		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
-		if resp.VersionInfo == clientVersion {
-			glog.V(0).Infof("Built listeners version %v is same as client %s, not sending anything", clientVersion, r.GetNode())
-			return
-		}
-
-		glog.V(0).Infof("Sending client %s new listener config \n: %s ", r.GetNode(), listeners)
-		stream.Send(resp)
-	})
+	handler := s.CreateListenerHandler(r, stream)
+	s.listenerConfigWatcher.AddHandler(handler)
 }
 
 func parseTargetResourceName(name string) (target *v1.ObjectReference, port int, err error) {

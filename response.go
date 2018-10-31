@@ -1,33 +1,23 @@
-package kubenvoyxds
+package kubenvoy
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"kubenvoy/utils"
 	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/golang/glog"
 
 	envoy "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	envoyCore "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	envoyEndpoint "github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
-	envoyBootstrap "github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v2"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gogo/protobuf/types"
 	"github.com/google/uuid"
 	"k8s.io/api/core/v1"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/ghodss/yaml"
-	"github.com/gogo/protobuf/jsonpb"
-)
-
-var (
-	edsClusterName = flag.String("eds_cluster_name", "xds_cluster", "XDS cluster name.")
 )
 
 // Not supported unfortunately ..... for now
@@ -151,7 +141,7 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 	lbendpoints := []envoyEndpoint.LbEndpoint{}
 	for _, subset := range endpoints.Subsets {
 		if !portAvailable(targetPort, subset.Ports) {
-			glog.V(0).Infof("target port not found in endpoints for %s", name)
+			glog.V(0).Infof("target port %v not found in endpoints for %s", name, targetPort)
 			continue
 		}
 
@@ -196,31 +186,22 @@ func (slice serviceSlice) ToEnvoyClusters() []*envoy.Cluster {
 
 func clustersFromOneService(svc *v1.Service) []*envoy.Cluster {
 	clusters := []*envoy.Cluster{}
-	for _, p := range svc.Spec.Ports {
-		c := &envoy.Cluster{
-			Name:                 kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", svc.Name, svc.Namespace, p.Port),
-			ConnectTimeout:       time.Second * 1,
-			LbPolicy:             envoy.Cluster_ROUND_ROBIN,
-			Type:                 envoy.Cluster_EDS,
-			Http2ProtocolOptions: &envoyCore.Http2ProtocolOptions{},
-			EdsClusterConfig: &envoy.Cluster_EdsClusterConfig{
-				EdsConfig: &envoyCore.ConfigSource{
-					ConfigSourceSpecifier: &envoyCore.ConfigSource_ApiConfigSource{ApiConfigSource: &envoyCore.ApiConfigSource{
-						ApiType: envoyCore.ApiConfigSource_GRPC,
-						GrpcServices: []*envoyCore.GrpcService{
-							&envoyCore.GrpcService{
-								TargetSpecifier: &envoyCore.GrpcService_EnvoyGrpc_{
-									EnvoyGrpc: &envoyCore.GrpcService_EnvoyGrpc{
-										ClusterName: *edsClusterName,
-									},
-								}},
-						},
-					},
-					},
-				},
-			},
-		}
 
+	clusterConfig := svc.GetAnnotations()["kubenvoy.Cluster"]
+	configOverride := &envoy.Cluster{}
+	if clusterConfig != "" {
+		var err error
+		configOverride, err = yamlToEnvoyCluster([]byte(clusterConfig))
+		if err != nil {
+			glog.Errorf("failed to parse cluster config in svc annotation %v", err)
+		}
+	}
+
+	for _, p := range svc.Spec.Ports {
+		clusterName := kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", svc.Name, svc.Namespace, p.Port)
+		c := proto.Clone(defaultCluster).(*envoy.Cluster)
+		proto.Merge(c, configOverride)
+		c.Name = clusterName
 		clusters = append(clusters, c)
 	}
 
@@ -259,19 +240,6 @@ type EnvoyListenerConfigWatcher struct {
 	mutex    sync.RWMutex
 }
 
-func envoyListenerFromYAML(data []byte) ([]envoy.Listener, error) {
-	data, err := yaml.YAMLToJSON(data)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse YAML file to JSON file: %v", err)
-	}
-	resources := envoyBootstrap.Bootstrap_StaticResources{}
-	if err := jsonpb.Unmarshal(strings.NewReader(string(data)), &resources); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal listeners %v", err)
-	}
-
-	return resources.GetListeners(), nil
-}
-
 func NewEnvoyListenerConfigWatcher(path string) *EnvoyListenerConfigWatcher {
 	w := &EnvoyListenerConfigWatcher{
 		path:     path,
@@ -308,7 +276,7 @@ func (m *EnvoyListenerConfigWatcher) loadConfig() error {
 		return fmt.Errorf("cannot read listeners config file: %v", err)
 	}
 
-	listeners, err := envoyListenerFromYAML(data)
+	listeners, err := yamlToEnvoyListener(data)
 	if err != nil {
 		return fmt.Errorf("failed to load listeners config file: %v", err)
 	}

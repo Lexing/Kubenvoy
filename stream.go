@@ -1,4 +1,4 @@
-package kubenvoyxds
+package kubenvoy
 
 import (
 	"context"
@@ -123,7 +123,7 @@ func (s *XDSStream) getOrCreateAckChanForResponse(nonce string) chan *envoy.Disc
 	return s.ackChan[nonce]
 }
 
-func (s *XDSStream) deleteAckChanForRespoonse(nonce string) {
+func (s *XDSStream) deleteAckChanForResponse(nonce string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	delete(s.ackChan, nonce)
@@ -146,7 +146,7 @@ func (s *XDSStream) send(resp *envoy.DiscoveryResponse, count int) error {
 			glog.Warningf("failed to receive ACK/NAK from client for DiscoveryResponse %v, retry", resp.Nonce)
 			return s.send(resp, count+1)
 		case r := <-ack:
-			s.deleteAckChanForRespoonse(r.GetResponseNonce())
+			s.deleteAckChanForResponse(r.GetResponseNonce())
 			if r.GetTypeUrl() != resp.GetTypeUrl() {
 				return fmt.Errorf("got unexpected type in ACK request %v", r)
 			}

@@ -1,4 +1,4 @@
-package kubenvoyxds
+package kubenvoy
 
 import (
 	"fmt"
@@ -93,7 +93,7 @@ func (w *K8SResourceWatcher) watchResource(namespace string, fieldSelector field
 		}
 
 		lw := cache.NewFilteredListWatchFromClient(w.k8sClientSet.CoreV1().RESTClient(), resourceName, namespace, optionsModifier)
-		tmp := cache.NewSharedInformer(lw, objType, time.Minute*1) // default resync timer
+		tmp := cache.NewSharedInformer(lw, objType, time.Minute*10) // default resync timer
 		sw := NewSharedInformerWrapper(tmp, stopChan)
 		w.watches[key] = sw
 	}
