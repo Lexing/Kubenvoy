@@ -4,9 +4,9 @@
 
 Kubenvoy is an envoy distribution bundled with XDS for kubernetes, it's designed to work (mostly) as edge or service proxy with built-in discovery. Some good applications are API-gateways & load balancers. 
 
-It was built simply becaucuse Ambassador is not good / flexible enough, serveral benefits of Kubenvoy are 
+It was built simply becaucuse [Ambassador](https://www.getambassador.io/) is not good / flexible enough, serveral benefits of Kubenvoy are 
 
-1. Kubenvoy has true load balancing, it provides envoy service endpoints rather than DNS based cluster endpoints. Ambassador doesn't really resolve endpoints so traffics are not balanced across pods for the same services (if you don't want to use Headless service)
+1. Kubenvoy has true load balancing, it provides envoy service endpoints rather than DNS based cluster endpoints. Ambassador doesn't really resolve endpoints so traffics are not balanced across pods for same service (if you don't want to use Headless service in Kubernetes)
 
 2. Kubenvoy's implementation is lighter and more intuitive, it's built with native Envoy V2 API (grpc version)
 
@@ -22,13 +22,13 @@ However, Kubenvoy is also more than an API-gateway, people can use it as in-clus
 kubectl apply -f example-config/service.yaml
 ```
 
-2. Make your service discoverable by Kubenvoy with following labels, you can also use other methods, e.g `kubectl apply` to add labels too
+2. To make your Kubernetes service discoverable by Kubenvoy, apply label `kubenvoy-discovery=true` to the service with `kubectl label` or `kubectl apply`
 ```
 kubectl label svc [some service] kubenvoy-discovery=true
 ```
 
 
-3. Set up or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs formats, something like:
+3. Setup or change your listeners/routes in ConfigMap `kubenvoy-xds-config`, using native envoy configs formats. Configs will be automatically updated for envoy. Following is an example of one listener config, specs are [here](https://www.envoyproxy.io/docs/envoy/latest/api-v2/api/v2/lds.proto#envoy-api-msg-listener)
 ```
 apiVersion: v1
 kind: ConfigMap
