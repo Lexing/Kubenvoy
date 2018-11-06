@@ -77,9 +77,9 @@ func NewGRPCKubenvoyXDSServer(masterURL string, kubeConfigPath string) *grpc.Ser
 	return rpcs
 }
 
-func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryRequest, port int, stream *XDSStream) EndpointsHandler {
+func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryRequest, targetPort uint32, originalPort int, stream *XDSStream) EndpointsHandler {
 	return func(endpoints *v1.Endpoints) {
-		resp, err := BuildEDSResponse(endpoints, uint32(port))
+		resp, err := BuildEDSResponse(endpoints, targetPort, originalPort)
 		if err != nil {
 			glog.Errorf("Failed to generate EDS response: %v", err)
 			return
@@ -87,7 +87,7 @@ func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryReques
 
 		clientVersion := stream.AppliedVersion(r.GetTypeUrl(), strings.Join(r.GetResourceNames(), "|"))
 		if resp.VersionInfo == clientVersion {
-			glog.V(0).Infof("Built endpoint version %v for %v:%v is same as client %s, not sending anything", clientVersion, endpoints.GetObjectMeta().GetName(), port, r.GetNode())
+			glog.V(0).Infof("Built endpoint version %v for %v:%v is same as client %s, not sending anything", clientVersion, endpoints.GetObjectMeta().GetName(), targetPort, r.GetNode())
 			return
 		}
 
@@ -239,10 +239,10 @@ func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRe
 			return err
 		}
 
-		var targetPort int
+		var targetPort uint32
 		for _, p := range svc.Spec.Ports {
 			if p.Port == int32(svcPort) {
-				targetPort = p.TargetPort.IntValue()
+				targetPort = uint32(p.TargetPort.IntValue())
 				break
 			}
 		}
@@ -252,7 +252,7 @@ func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRe
 			continue
 		}
 
-		handler := s.CreateEndpointsEventHandler(r, targetPort, stream)
+		handler := s.CreateEndpointsEventHandler(r, targetPort, svcPort, stream)
 		go s.watcher.WatchEndpoints(target.Namespace, target.Name, handler, stopChan)
 	}
 
