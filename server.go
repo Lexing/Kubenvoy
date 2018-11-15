@@ -77,9 +77,9 @@ func NewGRPCKubenvoyXDSServer(masterURL string, kubeConfigPath string) *grpc.Ser
 	return rpcs
 }
 
-func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryRequest, targetPort uint32, originalPort int, stream *XDSStream) EndpointsHandler {
+func (s *KubenvoyXDSServer) CreateEndpointsEventHandler(r *envoy.DiscoveryRequest, targetPort uint32, originalPort int, stream *XDSStream, resourceName string) EndpointsHandler {
 	return func(endpoints *v1.Endpoints) {
-		resp, err := BuildEDSResponse(endpoints, targetPort, originalPort)
+		resp, err := BuildEDSResponse(endpoints, targetPort, originalPort, resourceName)
 		if err != nil {
 			glog.Errorf("Failed to generate EDS response: %v", err)
 			return
@@ -252,7 +252,7 @@ func (s *KubenvoyXDSServer) handleEndpointsDiscoveryRequest(r *envoy.DiscoveryRe
 			continue
 		}
 
-		handler := s.CreateEndpointsEventHandler(r, targetPort, svcPort, stream)
+		handler := s.CreateEndpointsEventHandler(r, targetPort, svcPort, stream, resourceName)
 		go s.watcher.WatchEndpoints(target.Namespace, target.Name, handler, stopChan)
 	}
 

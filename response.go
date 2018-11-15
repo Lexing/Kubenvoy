@@ -121,7 +121,7 @@ func portAvailable(targetPort uint32, ports []v1.EndpointPort) bool {
 }
 
 // ClusterLoadAssignmentFromEndpoint converts k8s API object endpoints to envoy api ClusterLoadAssignment
-func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint32, originalPort int) *envoy.ClusterLoadAssignment {
+func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint32, originalPort int, clusterName string) *envoy.ClusterLoadAssignment {
 	type Address = envoyCore.Address
 	type SocketAddress = envoyCore.SocketAddress
 	type Address_SocketAddress = envoyCore.Address_SocketAddress
@@ -136,7 +136,7 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 
 	name := endpoints.GetObjectMeta().GetName()
 	namespace := endpoints.GetObjectMeta().GetNamespace()
-	clusterName := kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", name, namespace, originalPort)
+	clusterName = kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", name, namespace, originalPort)
 
 	lbendpoints := []envoyEndpoint.LbEndpoint{}
 	for _, subset := range endpoints.Subsets {
@@ -169,8 +169,8 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 }
 
 // BuildEDSResponse builds an envoy EDS DiscoveryResponse with given endpoints and port
-func BuildEDSResponse(endpoints *v1.Endpoints, targetPort uint32, originalPort int) (*envoy.DiscoveryResponse, error) {
-	assignment := ClusterLoadAssignmentFromEndpoint(endpoints, targetPort, originalPort)
+func BuildEDSResponse(endpoints *v1.Endpoints, targetPort uint32, originalPort int, clusterName string) (*envoy.DiscoveryResponse, error) {
+	assignment := ClusterLoadAssignmentFromEndpoint(endpoints, targetPort, originalPort, clusterName)
 	return BuildDiscoveryResponseOne("type.googleapis.com/envoy.api.v2.ClusterLoadAssignment", assignment)
 }
 
