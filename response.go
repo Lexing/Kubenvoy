@@ -127,16 +127,16 @@ func ClusterLoadAssignmentFromEndpoint(endpoints *v1.Endpoints, targetPort uint3
 	type Address_SocketAddress = envoyCore.Address_SocketAddress
 	type SocketAddress_PortValue = envoyCore.SocketAddress_PortValue
 
-	name := endpoints.GetObjectMeta().GetName()
-	namespace := endpoints.GetObjectMeta().GetNamespace()
-	clusterName := kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", name, namespace, originalPort)
-
 	if endpoints == nil {
 		return &envoy.ClusterLoadAssignment{
 			ClusterName: clusterName,
 			Endpoints:   []envoyEndpoint.LocalityLbEndpoints{},
 		}
 	}
+
+	name := endpoints.GetObjectMeta().GetName()
+	namespace := endpoints.GetObjectMeta().GetNamespace()
+	clusterName := kubenvoyTargetPrefix + fmt.Sprintf("%v.%v:%v", name, namespace, originalPort)
 
 	lbendpoints := []envoyEndpoint.LbEndpoint{}
 	for _, subset := range endpoints.Subsets {
